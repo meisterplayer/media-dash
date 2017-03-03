@@ -1,0 +1,21 @@
+{
+  "name": "@npm-wearetriple/meister-plugin-dash",
+  "version": "1.0.0",
+  "description": "Meister plugin wrapping the dashjs player.",
+  "main": "dist/Dash.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "meister",
+    "video",
+    "plugin"
+  ],
+  "author": "Triple",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@npm-wearetriple/js-dev": "^2.3.3",
+    "dashjs": "git+https://git.triple-it.nl/javascript/dashjs_fork.git#triple_2.4.0",
+    "gulp": "^3.9.1"
+  }
+}
