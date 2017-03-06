@@ -15,7 +15,9 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@npm-wearetriple/js-dev": "^2.3.3",
-    "dashjs": "git+https://git.triple-it.nl/javascript/dashjs_fork.git#triple_2.4.0",
+    "dashjs": "git+https://git.triple-it.nl/javascript/dashjs_fork.git#triple_2.4.0"
+  },
+  "devDependencies": {
     "gulp": "^3.9.1"
   }
 }
