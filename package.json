@@ -14,7 +14,7 @@
   "author": "Triple",
   "license": "Apache-2.0",
   "dependencies": {
-    "dashjs": "git+https://git.triple-it.nl/javascript/dashjs_fork.git#triple_2.4.0"
+    "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#triple_2.4.1"
   },
   "devDependencies": {
     "@npm-wearetriple/js-dev": "^2.3.3",
