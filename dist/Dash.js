@@ -2118,12 +2118,6 @@ function IsoFile() {
 IsoFile.__dashjs_factory_name = 'IsoFile';
 var IsoFile$1 = FactoryMaker.getClassFactory(IsoFile);
 
-var commonjsGlobal = typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
-
-
-
-
-
 function createCommonjsModule(fn, module) {
 	return module = { exports: {} }, fn(module, module.exports), module.exports;
 }
@@ -3159,14 +3153,18 @@ function VideoModel() {
     }
 
     function getPlaybackQuality() {
-        var hasWebKit = 'webkitDroppedFrameCount' in element;
+        var hasWebKit = 'webkitDroppedFrameCount' in element && 'webkitDecodedFrameCount' in element;
         var hasQuality = 'getVideoPlaybackQuality' in element;
         var result = null;
 
         if (hasQuality) {
             result = element.getVideoPlaybackQuality();
         } else if (hasWebKit) {
-            result = { droppedVideoFrames: element.webkitDroppedFrameCount, creationTime: new Date() };
+            result = {
+                droppedVideoFrames: element.webkitDroppedFrameCount,
+                totalVideoFrames: element.webkitDroppedFrameCount + element.webkitDecodedFrameCount,
+                creationTime: new Date()
+            };
         }
 
         return result;
@@ -3347,7 +3345,7 @@ function TextTracks() {
             }
             setCurrentTrackIdx.call(this, defaultIndex);
             if (defaultIndex >= 0) {
-                for (var idx = 0; i < video.textTracks.length; idx++) {
+                for (var idx = 0; idx < video.textTracks.length; idx++) {
                     video.textTracks[idx].mode = idx === defaultIndex ? 'showing' : 'hidden';
                 }
                 this.addCaptions(defaultIndex, 0, null);
@@ -7468,7 +7466,11 @@ function LiveEdgeFinder() {
 
     function getLiveEdge() {
         var representationInfo = streamProcessor.getCurrentRepresentationInfo();
-        var liveEdge = representationInfo.useCalculatedLiveEdgeTime ? timelineConverter.getExpectedLiveEdge() : representationInfo.DVRWindow.end;
+        var liveEdge = representationInfo.DVRWindow.end;
+        if (representationInfo.useCalculatedLiveEdgeTime) {
+            liveEdge = timelineConverter.getExpectedLiveEdge();
+            timelineConverter.setClientTimeOffset(liveEdge - representationInfo.DVRWindow.end);
+        }
         return liveEdge;
     }
 
@@ -7487,64 +7489,6 @@ function LiveEdgeFinder() {
 }
 LiveEdgeFinder.__dashjs_factory_name = 'LiveEdgeFinder';
 var factory$9 = FactoryMaker.getSingletonFactory(LiveEdgeFinder);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-
-var NO_CHANGE = 999;
-var DEFAULT = 0.5;
-var STRONG = 1;
-var WEAK = 0;
-
-function SwitchRequest(v, p, r) {
-    //TODO refactor all the calls to this to use config to be like everything else.
-    var value = v === undefined ? NO_CHANGE : v;
-    var priority = p === undefined ? DEFAULT : p;
-    var reason = r === undefined ? null : r;
-
-    var instance = {
-        value: value,
-        priority: priority,
-        reason: reason
-    };
-
-    return instance;
-}
-
-SwitchRequest.__dashjs_factory_name = 'SwitchRequest';
-var factory$11 = FactoryMaker.getClassFactory(SwitchRequest);
-factory$11.NO_CHANGE = NO_CHANGE;
-factory$11.DEFAULT = DEFAULT;
-factory$11.STRONG = STRONG;
-factory$11.WEAK = WEAK;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -7620,140 +7564,222 @@ var BitrateInfo = function BitrateInfo() {
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-function ThroughputRule(config) {
+/**
+ * @class
+ *
+ */
 
-    var MAX_MEASUREMENTS_TO_KEEP = 20;
-    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE = 3;
-    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD = 4;
-    var CACHE_LOAD_THRESHOLD_VIDEO = 50;
-    var CACHE_LOAD_THRESHOLD_AUDIO = 5;
-    var THROUGHPUT_DECREASE_SCALE = 1.3;
-    var THROUGHPUT_INCREASE_SCALE = 1.3;
+var MediaPlayerEvents = function (_EventsBase) {
+  inherits(MediaPlayerEvents, _EventsBase);
 
-    var context = this.context;
-    var log = Debug$1(context).getInstance().log;
-    var dashMetrics = config.dashMetrics;
-    var metricsModel = config.metricsModel;
+  /**
+   * @description Public facing external events to be used when developing a player that implements dash.js.
+   */
+  function MediaPlayerEvents() {
+    classCallCheck(this, MediaPlayerEvents);
 
-    var throughputArray = void 0,
-        cacheLoadDict = void 0,
-        mediaPlayerModel = void 0;
+    /**
+     * Triggered when playback will not start yet
+     * as the MPD's availabilityStartTime is in the future.
+     * Check delay property in payload to determine time before playback will start.
+     */
+    var _this = possibleConstructorReturn(this, (MediaPlayerEvents.__proto__ || Object.getPrototypeOf(MediaPlayerEvents)).call(this));
 
-    function setup() {
-        throughputArray = [];
-        cacheLoadDict = { audio: { threshold: CACHE_LOAD_THRESHOLD_AUDIO, value: NaN }, video: { threshold: CACHE_LOAD_THRESHOLD_VIDEO, value: NaN } }; //threshold is in milliseconds
-        mediaPlayerModel = factory$4(context).getInstance();
-    }
+    _this.AST_IN_FUTURE = 'astInFuture';
+    /**
+     * Triggered when the video element's buffer state changes to stalled.
+     * Check mediaType in payload to determine type (Video, Audio, FragmentedText).
+     * @event MediaPlayerEvents#BUFFER_EMPTY
+     */
+    _this.BUFFER_EMPTY = 'bufferStalled';
+    /**
+     * Triggered when the video element's buffer state changes to loaded.
+     * Check mediaType in payload to determine type (Video, Audio, FragmentedText).
+     * @event MediaPlayerEvents#BUFFER_LOADED
+     */
+    _this.BUFFER_LOADED = 'bufferLoaded';
 
-    function storeLastRequestThroughputByType(type, throughput) {
-        throughputArray[type] = throughputArray[type] || [];
-        throughputArray[type].push(throughput);
-    }
+    /**
+     * Triggered when the video element's buffer state changes, either stalled or loaded. Check payload for state.
+     * @event MediaPlayerEvents#BUFFER_LEVEL_STATE_CHANGED
+     */
+    _this.BUFFER_LEVEL_STATE_CHANGED = 'bufferStateChanged';
 
-    function getSample(type, isDynamic) {
-        var size = Math.min(throughputArray[type].length, isDynamic ? AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE : AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD);
-        var sampleArray = throughputArray[type].slice(size * -1, throughputArray[type].length);
-        if (sampleArray.length > 1) {
-            sampleArray.reduce(function (a, b) {
-                if (a * THROUGHPUT_INCREASE_SCALE <= b || a >= b * THROUGHPUT_DECREASE_SCALE) {
-                    size++;
-                }
-                return b;
-            });
-        }
-        size = Math.min(throughputArray[type].length, size);
-        return throughputArray[type].slice(size * -1, throughputArray[type].length);
-    }
+    /**
+    * Triggered when there is an error from the element or MSE source buffer.
+    * @event MediaPlayerEvents#ERROR
+    */
+    _this.ERROR = 'error';
 
-    function getAverageThroughput(type, isDynamic) {
-        var sample = getSample(type, isDynamic);
-        var averageThroughput = 0;
-        if (sample.length > 0) {
-            var totalSampledValue = sample.reduce(function (a, b) {
-                return a + b;
-            }, 0);
-            averageThroughput = totalSampledValue / sample.length;
-        }
-        if (throughputArray[type].length >= MAX_MEASUREMENTS_TO_KEEP) {
-            throughputArray[type].shift();
-        }
-        return averageThroughput / 1000 * mediaPlayerModel.getBandwidthSafetyFactor();
-    }
+    /**
+    * Triggered when a fragment download has completed.
+    * @event MediaPlayerEvents#FRAGMENT_LOADING_COMPLETED
+    */
+    _this.FRAGMENT_LOADING_COMPLETED = 'fragmentLoadingCompleted';
+    /**
+    * Triggered when a fragment download has started.
+    * @event MediaPlayerEvents#FRAGMENT_LOADING_STARTED
+    */
+    _this.FRAGMENT_LOADING_STARTED = 'fragmentLoadingStarted';
+    /**
+    * Triggered when a fragment download is abandoned due to detection of slow download base on the ABR abandon rule..
+    * @event MediaPlayerEvents#FRAGMENT_LOADING_ABANDONED
+    */
+    _this.FRAGMENT_LOADING_ABANDONED = 'fragmentLoadingAbandoned';
+    /**
+     * Triggered when {@link module:Debug} log method is called.
+     * @event MediaPlayerEvents#LOG
+     */
+    _this.LOG = 'log';
+    //TODO refactor with internal event
+    /**
+     * Triggered when the manifest load is complete
+     * @event MediaPlayerEvents#MANIFEST_LOADED
+     */
+    _this.MANIFEST_LOADED = 'manifestLoaded';
+    /**
+     * Triggered anytime there is a change to the overall metrics.
+     * @event MediaPlayerEvents#METRICS_CHANGED
+     */
+    _this.METRICS_CHANGED = 'metricsChanged';
+    /**
+     * Triggered when an individual metric is added, updated or cleared.
+     * @event MediaPlayerEvents#METRIC_CHANGED
+     */
+    _this.METRIC_CHANGED = 'metricChanged';
+    /**
+     * Triggered every time a new metric is added.
+     * @event MediaPlayerEvents#METRIC_ADDED
+     */
+    _this.METRIC_ADDED = 'metricAdded';
+    /**
+     * Triggered every time a metric is updated.
+     * @event MediaPlayerEvents#METRIC_UPDATED
+     */
+    _this.METRIC_UPDATED = 'metricUpdated';
+    /**
+     * Triggered at the stream end of a period.
+     * @event MediaPlayerEvents#PERIOD_SWITCH_COMPLETED
+     */
+    _this.PERIOD_SWITCH_COMPLETED = 'periodSwitchCompleted';
+    /**
+     * Triggered when a new period starts.
+     * @event MediaPlayerEvents#PERIOD_SWITCH_STARTED
+     */
+    _this.PERIOD_SWITCH_STARTED = 'periodSwitchStarted';
 
-    function execute(rulesContext, callback) {
+    /**
+     * Triggered when an ABR up /down switch is initialed; either by user in manual mode or auto mode via ABR rules.
+     * @event MediaPlayerEvents#QUALITY_CHANGE_REQUESTED
+     */
+    _this.QUALITY_CHANGE_REQUESTED = 'qualityChangeRequested';
 
-        var mediaInfo = rulesContext.getMediaInfo();
-        var mediaType = mediaInfo.type;
-        var currentQuality = rulesContext.getCurrentValue();
-        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-        var streamProcessor = rulesContext.getStreamProcessor();
-        var abrController = streamProcessor.getABRController();
-        var isDynamic = streamProcessor.isDynamic();
-        var lastRequest = dashMetrics.getCurrentHttpRequest(metrics);
-        var bufferStateVO = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: ThroughputRule.__dashjs_factory_name });
+    /**
+     * Triggered when the new ABR quality is being rendered on-screen.
+     * @event MediaPlayerEvents#QUALITY_CHANGE_RENDERED
+     */
+    _this.QUALITY_CHANGE_RENDERED = 'qualityChangeRendered';
 
-        if (!metrics || !lastRequest || lastRequest.type !== HTTPRequest.MEDIA_SEGMENT_TYPE || !bufferStateVO) {
-            callback(switchRequest);
-            return;
-        }
+    /**
+     * Triggered when the stream is setup and ready.
+     * @event MediaPlayerEvents#STREAM_INITIALIZED
+     */
+    _this.STREAM_INITIALIZED = 'streamInitialized';
+    /**
+     * Triggered once all text tracks detected in the MPD are added to the video element.
+     * @event MediaPlayerEvents#TEXT_TRACKS_ADDED
+     */
+    _this.TEXT_TRACKS_ADDED = 'allTextTracksAdded';
+    /**
+     * Triggered when a text track is added to the video element's TextTrackList
+     * @event MediaPlayerEvents#TEXT_TRACK_ADDED
+     */
+    _this.TEXT_TRACK_ADDED = 'textTrackAdded';
 
-        var downloadTimeInMilliseconds = void 0;
+    /**
+     * Sent when enough data is available that the media can be played,
+     * at least for a couple of frames.  This corresponds to the
+     * HAVE_ENOUGH_DATA readyState.
+     * @event MediaPlayerEvents#CAN_PLAY
+     */
+    _this.CAN_PLAY = 'canPlay';
 
-        if (lastRequest.trace && lastRequest.trace.length) {
+    /**
+     * Sent when playback completes.
+     * @event MediaPlayerEvents#PLAYBACK_ENDED
+     */
+    _this.PLAYBACK_ENDED = 'playbackEnded';
 
-            downloadTimeInMilliseconds = lastRequest._tfinish.getTime() - lastRequest.tresponse.getTime() + 1; //Make sure never 0 we divide by this value. Avoid infinity!
+    /**
+     * Sent when an error occurs.  The element's error
+     * attribute contains more information.
+     * @event MediaPlayerEvents#PLAYBACK_ERROR
+     */
+    _this.PLAYBACK_ERROR = 'playbackError';
+    /**
+     * Sent when playback is not allowed (for example if user gesture is needed).
+     * @event MediaPlayerEvents#PLAYBACK_NOT_ALLOWED
+     */
+    _this.PLAYBACK_NOT_ALLOWED = 'playbackNotAllowed';
+    /**
+     * The media's metadata has finished loading; all attributes now
+     * contain as much useful information as they're going to.
+     * @event MediaPlayerEvents#PLAYBACK_METADATA_LOADED
+     */
+    _this.PLAYBACK_METADATA_LOADED = 'playbackMetaDataLoaded';
+    /**
+     * Sent when playback is paused.
+     * @event MediaPlayerEvents#PLAYBACK_PAUSED
+     */
+    _this.PLAYBACK_PAUSED = 'playbackPaused';
+    /**
+     * Sent when the media begins to play (either for the first time, after having been paused,
+     * or after ending and then restarting).
+     *
+     * @event MediaPlayerEvents#PLAYBACK_PLAYING
+     */
+    _this.PLAYBACK_PLAYING = 'playbackPlaying';
+    /**
+     * Sent periodically to inform interested parties of progress downloading
+     * the media. Information about the current amount of the media that has
+     * been downloaded is available in the media element's buffered attribute.
+     * @event MediaPlayerEvents#PLAYBACK_PROGRESS
+     */
+    _this.PLAYBACK_PROGRESS = 'playbackProgress';
+    /**
+     * Sent when the playback speed changes.
+     * @event MediaPlayerEvents#PLAYBACK_RATE_CHANGED
+     */
+    _this.PLAYBACK_RATE_CHANGED = 'playbackRateChanged';
+    /**
+     * Sent when a seek operation completes.
+     * @event MediaPlayerEvents#PLAYBACK_SEEKED
+     */
+    _this.PLAYBACK_SEEKED = 'playbackSeeked';
+    /**
+     * Sent when a seek operation begins.
+     * @event MediaPlayerEvents#PLAYBACK_SEEKING
+     */
+    _this.PLAYBACK_SEEKING = 'playbackSeeking';
+    /**
+     * Sent when playback of the media starts after having been paused;
+     * that is, when playback is resumed after a prior pause event.
+     *
+     * @event MediaPlayerEvents#PLAYBACK_STARTED
+     */
+    _this.PLAYBACK_STARTED = 'playbackStarted';
+    /**
+     * The time indicated by the element's currentTime attribute has changed.
+     * @event MediaPlayerEvents#PLAYBACK_TIME_UPDATED
+     */
+    _this.PLAYBACK_TIME_UPDATED = 'playbackTimeUpdated';
+    return _this;
+  }
 
-            var bytes = lastRequest.trace.reduce(function (a, b) {
-                return a + b.b[0];
-            }, 0);
-            var lastRequestThroughput = Math.round(bytes * 8 / (downloadTimeInMilliseconds / 1000));
+  return MediaPlayerEvents;
+}(EventsBase);
 
-            //Prevent cached fragment loads from skewing the average throughput value - allow first even if cached to set allowance for ABR rules..
-            if (downloadTimeInMilliseconds <= cacheLoadDict[mediaType].threshold) {
-                cacheLoadDict[mediaType].value = lastRequestThroughput / 1000;
-            } else {
-                cacheLoadDict[mediaType].value = NaN;
-                storeLastRequestThroughputByType(mediaType, lastRequestThroughput);
-            }
-        }
-
-        var throughput = Math.round(!isNaN(cacheLoadDict[mediaType].value) ? cacheLoadDict[mediaType].value : getAverageThroughput(mediaType, isDynamic));
-        abrController.setAverageThroughput(mediaType, throughput);
-
-        if (abrController.getAbandonmentStateFor(mediaType) !== factory$10.ABANDON_LOAD) {
-
-            if (bufferStateVO.state === factory$1.BUFFER_LOADED || isDynamic) {
-                var newQuality = abrController.getQualityForBitrate(mediaInfo, throughput);
-                streamProcessor.getScheduleController().setTimeToLoadDelay(0);
-                switchRequest.value = newQuality;
-                switchRequest.priority = factory$11.DEFAULT;
-                switchRequest.reason.throughput = throughput;
-            }
-
-            if (switchRequest.value !== factory$11.NO_CHANGE && switchRequest.value !== currentQuality) {
-                log('ThroughputRule requesting switch to index: ', switchRequest.value, 'type: ', mediaType, ' Priority: ', switchRequest.priority === factory$11.DEFAULT ? 'Default' : switchRequest.priority === factory$11.STRONG ? 'Strong' : 'Weak', 'Average throughput', Math.round(throughput), 'kbps');
-            }
-        }
-
-        callback(switchRequest);
-    }
-
-    function reset() {
-        setup();
-    }
-
-    var instance = {
-        execute: execute,
-        reset: reset
-    };
-
-    setup();
-    return instance;
-}
-
-ThroughputRule.__dashjs_factory_name = 'ThroughputRule';
-var ThroughputRule$1 = FactoryMaker.getClassFactory(ThroughputRule);
+var mediaPlayerEvents = new MediaPlayerEvents();
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -7785,904 +7811,1682 @@ var ThroughputRule$1 = FactoryMaker.getClassFactory(ThroughputRule);
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-function BufferOccupancyRule(config) {
+function ManifestModel() {
+
+    var context = this.context;
+    var eventBus = factory$3(context).getInstance();
+
+    var instance = void 0,
+        manifest = void 0;
+
+    function getValue() {
+        return manifest;
+    }
+
+    function setValue(value) {
+        manifest = value;
+        if (value) {
+            eventBus.trigger(events.MANIFEST_LOADED, { data: value });
+        }
+    }
+
+    instance = {
+        getValue: getValue,
+        setValue: setValue
+    };
+
+    return instance;
+}
+
+ManifestModel.__dashjs_factory_name = 'ManifestModel';
+var ManifestModel$1 = FactoryMaker.getSingletonFactory(ManifestModel);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+var Representation = function () {
+    function Representation() {
+        classCallCheck(this, Representation);
+
+        this.id = null;
+        this.index = -1;
+        this.adaptation = null;
+        this.segmentInfoType = null;
+        this.initialization = null;
+        this.segmentDuration = NaN;
+        this.timescale = 1;
+        this.startNumber = 1;
+        this.indexRange = null;
+        this.range = null;
+        this.presentationTimeOffset = 0;
+        // Set the source buffer timeOffset to this
+        this.MSETimeOffset = NaN;
+        this.segmentAvailabilityRange = null;
+        this.availableSegmentsNumber = 0;
+        this.bandwidth = NaN;
+        this.maxPlayoutRate = NaN;
+    }
+
+    createClass(Representation, null, [{
+        key: 'hasInitialization',
+        value: function hasInitialization(r) {
+            return r.initialization !== null || (r.segmentInfoType !== 'BaseURL' || r.segmentInfoType !== 'SegmentBase') && r.range !== null;
+        }
+    }, {
+        key: 'hasSegments',
+        value: function hasSegments(r) {
+            return r.segmentInfoType !== 'BaseURL' && r.segmentInfoType !== 'SegmentBase' && !r.indexRange;
+        }
+    }]);
+    return Representation;
+}();
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+var AdaptationSet = function AdaptationSet() {
+  classCallCheck(this, AdaptationSet);
+
+  this.period = null;
+  this.index = -1;
+  this.type = null;
+};
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+var Period = function Period() {
+  classCallCheck(this, Period);
+
+  this.id = null;
+  this.index = -1;
+  this.duration = NaN;
+  this.start = NaN;
+  this.mpd = null;
+};
+
+Period.DEFAULT_ID = 'defaultId';
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+var Mpd = function Mpd() {
+  classCallCheck(this, Mpd);
+
+  this.manifest = null;
+  this.suggestedPresentationDelay = 0;
+  this.availabilityStartTime = null;
+  this.availabilityEndTime = Number.POSITIVE_INFINITY;
+  this.timeShiftBufferDepth = Number.POSITIVE_INFINITY;
+  this.maxSegmentDuration = Number.POSITIVE_INFINITY;
+  this.minimumUpdatePeriod = NaN;
+  this.mediaPresentationDuration = NaN;
+};
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+function TimelineConverter() {
+
+    var context = this.context;
+    var eventBus = factory$3(context).getInstance();
+
+    var instance = void 0,
+        clientServerTimeShift = void 0,
+        isClientServerTimeSyncCompleted = void 0,
+        expectedLiveEdge = void 0;
+
+    function initialize() {
+
+        clientServerTimeShift = 0;
+        isClientServerTimeSyncCompleted = false;
+        expectedLiveEdge = NaN;
+        eventBus.on(events.TIME_SYNCHRONIZATION_COMPLETED, onTimeSyncComplete, this);
+    }
+
+    function isTimeSyncCompleted() {
+        return isClientServerTimeSyncCompleted;
+    }
+
+    function setTimeSyncCompleted(value) {
+        isClientServerTimeSyncCompleted = value;
+    }
+
+    function getClientTimeOffset() {
+        return clientServerTimeShift;
+    }
+
+    function setClientTimeOffset(value) {
+        clientServerTimeShift = value;
+    }
+
+    function getExpectedLiveEdge() {
+        return expectedLiveEdge;
+    }
+
+    function setExpectedLiveEdge(value) {
+        expectedLiveEdge = value;
+    }
+
+    function calcAvailabilityTimeFromPresentationTime(presentationTime, mpd, isDynamic, calculateEnd) {
+        var availabilityTime = NaN;
+
+        if (calculateEnd) {
+            //@timeShiftBufferDepth specifies the duration of the time shifting buffer that is guaranteed
+            // to be available for a Media Presentation with type 'dynamic'.
+            // When not present, the value is infinite.
+            if (isDynamic && mpd.timeShiftBufferDepth != Number.POSITIVE_INFINITY) {
+                availabilityTime = new Date(mpd.availabilityStartTime.getTime() + (presentationTime + mpd.timeShiftBufferDepth) * 1000);
+            } else {
+                availabilityTime = mpd.availabilityEndTime;
+            }
+        } else {
+            if (isDynamic) {
+                availabilityTime = new Date(mpd.availabilityStartTime.getTime() + (presentationTime - clientServerTimeShift) * 1000);
+            } else {
+                // in static mpd, all segments are available at the same time
+                availabilityTime = mpd.availabilityStartTime;
+            }
+        }
+
+        return availabilityTime;
+    }
+
+    function calcAvailabilityStartTimeFromPresentationTime(presentationTime, mpd, isDynamic) {
+        return calcAvailabilityTimeFromPresentationTime.call(this, presentationTime, mpd, isDynamic);
+    }
+
+    function calcAvailabilityEndTimeFromPresentationTime(presentationTime, mpd, isDynamic) {
+        return calcAvailabilityTimeFromPresentationTime.call(this, presentationTime, mpd, isDynamic, true);
+    }
+
+    function calcPresentationTimeFromWallTime(wallTime, period) {
+        //console.log("XXX", wallTime.getTime() - period.mpd.availabilityStartTime.getTime(), clientServerTimeShift * 1000, clientServerTimeShift, period.mpd.availabilityStartTime.getTime())
+        return (wallTime.getTime() - period.mpd.availabilityStartTime.getTime() + clientServerTimeShift * 1000) / 1000;
+    }
+
+    function calcPresentationTimeFromMediaTime(mediaTime, representation) {
+        var periodStart = representation.adaptation.period.start;
+        var presentationOffset = representation.presentationTimeOffset;
+
+        return mediaTime + (periodStart - presentationOffset);
+    }
+
+    function calcMediaTimeFromPresentationTime(presentationTime, representation) {
+        var periodStart = representation.adaptation.period.start;
+        var presentationOffset = representation.presentationTimeOffset;
+
+        return presentationTime - periodStart + presentationOffset;
+    }
+
+    function calcWallTimeForSegment(segment, isDynamic) {
+        var suggestedPresentationDelay, displayStartTime, wallTime;
+
+        if (isDynamic) {
+            suggestedPresentationDelay = segment.representation.adaptation.period.mpd.suggestedPresentationDelay;
+            displayStartTime = segment.presentationStartTime + suggestedPresentationDelay;
+            wallTime = new Date(segment.availabilityStartTime.getTime() + displayStartTime * 1000);
+        }
+
+        return wallTime;
+    }
+
+    function calcSegmentAvailabilityRange(representation, isDynamic) {
+
+        // Static Range Finder
+        var period = representation.adaptation.period;
+        var range = { start: period.start, end: period.start + period.duration };
+        if (!isDynamic) return range;
+
+        if (!isClientServerTimeSyncCompleted && representation.segmentAvailabilityRange) {
+            return representation.segmentAvailabilityRange;
+        }
+
+        //Dyanmic Range Finder
+        var d = representation.segmentDuration || (representation.segments && representation.segments.length ? representation.segments[representation.segments.length - 1].duration : 0);
+        var now = calcPresentationTimeFromWallTime(new Date(), period);
+        var periodEnd = period.start + period.duration;
+        range.start = Math.max(now - period.mpd.timeShiftBufferDepth, period.start);
+        range.end = now >= periodEnd && now - d < periodEnd ? periodEnd - d : now - d;
+
+        return range;
+    }
+
+    function calcPeriodRelativeTimeFromMpdRelativeTime(representation, mpdRelativeTime) {
+        var periodStartTime = representation.adaptation.period.start;
+        return mpdRelativeTime - periodStartTime;
+    }
+
+    function calcMpdRelativeTimeFromPeriodRelativeTime(representation, periodRelativeTime) {
+        var periodStartTime = representation.adaptation.period.start;
+
+        return periodRelativeTime + periodStartTime;
+    }
+
+    /*
+    * We need to figure out if we want to timesync for segmentTimeine where useCalculatedLiveEdge = true
+    * seems we figure out client offset based on logic in liveEdgeFinder getLiveEdge timelineConverter.setClientTimeOffset(liveEdge - representationInfo.DVRWindow.end);
+    * FYI StreamController's onManifestUpdated entry point to timeSync
+    * */
+    function onTimeSyncComplete(e) {
+
+        if (isClientServerTimeSyncCompleted) return;
+
+        if (e.offset !== undefined) {
+
+            setClientTimeOffset(e.offset / 1000);
+            isClientServerTimeSyncCompleted = true;
+        }
+    }
+
+    function calcMSETimeOffset(representation) {
+        // The MSEOffset is offset from AST for media. It is Period@start - presentationTimeOffset
+        var presentationOffset = representation.presentationTimeOffset;
+        var periodStart = representation.adaptation.period.start;
+        return periodStart - presentationOffset;
+    }
+
+    function reset() {
+        eventBus.off(events.TIME_SYNCHRONIZATION_COMPLETED, onTimeSyncComplete, this);
+        clientServerTimeShift = 0;
+        isClientServerTimeSyncCompleted = false;
+        expectedLiveEdge = NaN;
+    }
+
+    instance = {
+        initialize: initialize,
+        isTimeSyncCompleted: isTimeSyncCompleted,
+        setTimeSyncCompleted: setTimeSyncCompleted,
+        getClientTimeOffset: getClientTimeOffset,
+        setClientTimeOffset: setClientTimeOffset,
+        getExpectedLiveEdge: getExpectedLiveEdge,
+        setExpectedLiveEdge: setExpectedLiveEdge,
+        calcAvailabilityStartTimeFromPresentationTime: calcAvailabilityStartTimeFromPresentationTime,
+        calcAvailabilityEndTimeFromPresentationTime: calcAvailabilityEndTimeFromPresentationTime,
+        calcPresentationTimeFromWallTime: calcPresentationTimeFromWallTime,
+        calcPresentationTimeFromMediaTime: calcPresentationTimeFromMediaTime,
+        calcPeriodRelativeTimeFromMpdRelativeTime: calcPeriodRelativeTimeFromMpdRelativeTime,
+        calcMpdRelativeTimeFromPeriodRelativeTime: calcMpdRelativeTimeFromPeriodRelativeTime,
+        calcMediaTimeFromPresentationTime: calcMediaTimeFromPresentationTime,
+        calcSegmentAvailabilityRange: calcSegmentAvailabilityRange,
+        calcWallTimeForSegment: calcWallTimeForSegment,
+        calcMSETimeOffset: calcMSETimeOffset,
+        reset: reset
+    };
+
+    return instance;
+}
+
+TimelineConverter.__dashjs_factory_name = 'TimelineConverter';
+var TimelineConverter$1 = FactoryMaker.getSingletonFactory(TimelineConverter);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+
+var DEFAULT_DVB_PRIORITY = 1;
+var DEFAULT_DVB_WEIGHT = 1;
+
+var BaseURL = function BaseURL(url, serviceLocation, priority, weight) {
+  classCallCheck(this, BaseURL);
+
+  this.url = url || '';
+  this.serviceLocation = serviceLocation || url || '';
+
+  // DVB extensions
+  this.dvb_priority = priority || DEFAULT_DVB_PRIORITY;
+  this.dvb_weight = weight || DEFAULT_DVB_WEIGHT;
+
+  /* currently unused:
+   * byteRange,
+   * availabilityTimeOffset,
+   * availabilityTimeComplete
+   */
+};
+
+BaseURL.DEFAULT_DVB_PRIORITY = DEFAULT_DVB_PRIORITY;
+BaseURL.DEFAULT_DVB_WEIGHT = DEFAULT_DVB_WEIGHT;
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+/**
+ * @class
+ * @ignore
+ */
+var EventStream = function EventStream() {
+  classCallCheck(this, EventStream);
+
+  this.adaptionSet = null;
+  this.representation = null;
+  this.period = null;
+  this.timescale = 1;
+  this.value = '';
+  this.schemeIdUri = '';
+};
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/**
+ * @module URLUtils
+ * @description Provides utility functions for operating on URLs.
+ * Initially this is simply a method to determine the Base URL of a URL, but
+ * should probably include other things provided all over the place such as
+ * determining whether a URL is relative/absolute, resolving two paths etc.
+ */
+function URLUtils() {
+
+    var resolveFunction = void 0;
+
+    var schemeRegex = /^[a-z][a-z0-9+\-.]*:/i;
+    var httpUrlRegex = /^https?:\/\//i;
+    var originRegex = /^([a-z][a-z0-9+\-.]*:\/\/[^\/]+)\/?/i;
+
+    /**
+     * Resolves a url given an optional base url
+     * Uses window.URL to do the resolution.
+     *
+     * @param {string} url
+     * @param {string} [baseUrl]
+     * @return {string}
+     * @memberof module:URLUtils
+     * @instance
+     * @private
+     */
+    var nativeURLResolver = function nativeURLResolver(url, baseUrl) {
+        try {
+            // this will throw if baseurl is undefined, invalid etc
+            return new window.URL(url, baseUrl).toString();
+        } catch (e) {
+            return url;
+        }
+    };
+
+    /**
+     * Resolves a url given an optional base url
+     * Does not resolve ./, ../ etc but will do enough to construct something
+     * which will satisfy XHR etc when window.URL is not available ie
+     * IE11/node etc.
+     *
+     * @param {string} url
+     * @param {string} [baseUrl]
+     * @return {string}
+     * @memberof module:URLUtils
+     * @instance
+     * @private
+     */
+    var dumbURLResolver = function dumbURLResolver(url, baseUrl) {
+        var baseUrlParseFunc = parseBaseUrl;
+
+        if (!baseUrl) {
+            return url;
+        }
+
+        if (!isRelative(url)) {
+            return url;
+        }
+
+        if (isPathAbsolute(url)) {
+            baseUrlParseFunc = parseOrigin;
+        }
+
+        var base = baseUrlParseFunc(baseUrl);
+        var joinChar = base.charAt(base.length - 1) !== '/' && url.charAt(0) !== '/' ? '/' : '';
+
+        return [base, url].join(joinChar);
+    };
+
+    function setup() {
+        try {
+            var u = new window.URL('x', 'http://y'); //jshint ignore:line
+            resolveFunction = nativeURLResolver;
+        } catch (e) {
+            // must be IE11/Node etc
+        } finally {
+            resolveFunction = resolveFunction || dumbURLResolver;
+        }
+    }
+
+    /**
+     * Returns a string that contains the Base URL of a URL, if determinable.
+     * @param {string} url - full url
+     * @return {string}
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function parseBaseUrl(url) {
+        var slashIndex = url.indexOf('/');
+        var lastSlashIndex = url.lastIndexOf('/');
+
+        if (slashIndex !== -1) {
+            // if there is only '//'
+            if (lastSlashIndex === slashIndex + 1) {
+                return url;
+            }
+
+            if (url.indexOf('?') !== -1) {
+                url = url.substring(0, url.indexOf('?'));
+            }
+
+            return url.substring(0, lastSlashIndex + 1);
+        }
+
+        return '';
+    }
+
+    /**
+     * Returns a string that contains the scheme and origin of a URL,
+     * if determinable.
+     * @param {string} url - full url
+     * @return {string}
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function parseOrigin(url) {
+        var matches = url.match(originRegex);
+
+        if (matches) {
+            return matches[1];
+        }
+
+        return '';
+    }
+
+    /**
+     * Determines whether the url is relative.
+     * @return {bool}
+     * @param {string} url
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function isRelative(url) {
+        return !schemeRegex.test(url);
+    }
+
+    /**
+     * Determines whether the url is path-absolute.
+     * @return {bool}
+     * @param {string} url
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function isPathAbsolute(url) {
+        return isRelative(url) && url.charAt(0) === '/';
+    }
+
+    /**
+     * Determines whether the url is an HTTP-URL as defined in ISO/IEC
+     * 23009-1:2014 3.1.15. ie URL with a fixed scheme of http or https
+     * @return {bool}
+     * @param {string} url
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function isHTTPURL(url) {
+        return httpUrlRegex.test(url);
+    }
+
+    /**
+     * Resolves a url given an optional base url
+     * @return {string}
+     * @param {string} url
+     * @param {string} [baseUrl]
+     * @memberof module:URLUtils
+     * @instance
+     */
+    function resolve(url, baseUrl) {
+        return resolveFunction(url, baseUrl);
+    }
+
+    setup();
+
+    var instance = {
+        parseBaseUrl: parseBaseUrl,
+        parseOrigin: parseOrigin,
+        isRelative: isRelative,
+        isPathAbsolute: isPathAbsolute,
+        isHTTPURL: isHTTPURL,
+        resolve: resolve
+    };
+
+    return instance;
+}
+
+URLUtils.__dashjs_factory_name = 'URLUtils';
+var URLUtils$1 = FactoryMaker.getSingletonFactory(URLUtils);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+
+function DashManifestModel() {
 
     var instance = void 0;
     var context = this.context;
-    var log = Debug$1(context).getInstance().log;
+    var timelineConverter = TimelineConverter$1(context).getInstance(); //TODO Need to pass this in not bake in
+    var mediaController = factory$6(context).getInstance();
+    var adaptor = DashAdapter$1(context).getInstance();
 
-    var metricsModel = config.metricsModel;
-    var dashMetrics = config.dashMetrics;
+    var urlUtils = URLUtils$1(context).getInstance();
 
-    var lastSwitchTime = void 0,
-        mediaPlayerModel = void 0;
+    function getIsTypeOf(adaptation, type) {
 
-    function setup() {
-        lastSwitchTime = 0;
-        mediaPlayerModel = factory$4(context).getInstance();
-    }
+        var i, len, representation;
+        var result = false;
+        var found = false;
 
-    function execute(rulesContext, callback) {
-        var now = new Date().getTime() / 1000;
-        var mediaInfo = rulesContext.getMediaInfo();
-        var representationInfo = rulesContext.getTrackInfo();
-        var mediaType = mediaInfo.type;
-        var waitToSwitchTime = !isNaN(representationInfo.fragmentDuration) ? representationInfo.fragmentDuration / 2 : 2;
-        var current = rulesContext.getCurrentValue();
-        var streamProcessor = rulesContext.getStreamProcessor();
-        var abrController = streamProcessor.getABRController();
-        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-        var lastBufferLevel = dashMetrics.getCurrentBufferLevel(metrics);
-        var lastBufferStateVO = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
-        var isBufferRich = false;
-        var maxIndex = mediaInfo.representationCount - 1;
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: BufferOccupancyRule.__dashjs_factory_name });
+        var col = adaptation.ContentComponent_asArray;
+        var mimeTypeRegEx = type !== 'text' ? new RegExp(type) : new RegExp('(vtt|ttml)');
 
-        if (now - lastSwitchTime < waitToSwitchTime || abrController.getAbandonmentStateFor(mediaType) === factory$10.ABANDON_LOAD) {
-            callback(switchRequest);
-            return;
+        if (adaptation.Representation_asArray.length > 0 && adaptation.Representation_asArray[0].hasOwnProperty('codecs')) {
+            // Just check the start of the codecs string
+            var codecs = adaptation.Representation_asArray[0].codecs;
+            if (codecs.search('stpp') === 0 || codecs.search('wvtt') === 0) {
+                return type === 'fragmentedText';
+            }
         }
 
-        if (lastBufferStateVO !== null) {
-            // This will happen when another rule tries to switch from top to any other.
-            // If there is enough buffer why not try to stay at high level.
-            if (lastBufferLevel > lastBufferStateVO.target) {
-                isBufferRich = lastBufferLevel - lastBufferStateVO.target > mediaPlayerModel.getRichBufferThreshold();
+        if (col) {
+            if (col.length > 1) {
+                return type === 'muxed';
+            } else if (col[0] && col[0].contentType === type) {
+                result = true;
+                found = true;
+            }
+        }
 
-                if (isBufferRich && mediaInfo.representationCount > 1) {
-                    switchRequest.value = maxIndex;
-                    switchRequest.priority = factory$11.STRONG;
-                    switchRequest.reason.bufferLevel = lastBufferLevel;
-                    switchRequest.reason.bufferTarget = lastBufferStateVO.target;
+        if (adaptation.hasOwnProperty('mimeType')) {
+            result = mimeTypeRegEx.test(adaptation.mimeType);
+            found = true;
+        }
+
+        // couldn't find on adaptationset, so check a representation
+        if (!found) {
+            i = 0;
+            len = adaptation.Representation_asArray.length;
+            while (!found && i < len) {
+                representation = adaptation.Representation_asArray[i];
+
+                if (representation.hasOwnProperty('mimeType')) {
+                    result = mimeTypeRegEx.test(representation.mimeType);
+                    found = true;
+                }
+
+                i++;
+            }
+        }
+
+        return result;
+    }
+
+    function getIsAudio(adaptation) {
+        return getIsTypeOf(adaptation, 'audio');
+    }
+
+    function getIsVideo(adaptation) {
+        return getIsTypeOf(adaptation, 'video');
+    }
+
+    function getIsFragmentedText(adaptation) {
+        return getIsTypeOf(adaptation, 'fragmentedText');
+    }
+
+    function getIsText(adaptation) {
+        return getIsTypeOf(adaptation, 'text');
+    }
+
+    function getIsMuxed(adaptation) {
+        return getIsTypeOf(adaptation, 'muxed');
+    }
+
+    function getIsTextTrack(type) {
+        return type === 'text/vtt' || type === 'application/ttml+xml';
+    }
+
+    function getLanguageForAdaptation(adaptation) {
+        var lang = '';
+
+        if (adaptation.hasOwnProperty('lang')) {
+            //Filter out any other characters not allowed according to RFC5646
+            lang = adaptation.lang.replace(/[^A-Za-z0-9-]/g, '');
+        }
+
+        return lang;
+    }
+
+    function getViewpointForAdaptation(adaptation) {
+        return adaptation.hasOwnProperty('Viewpoint') ? adaptation.Viewpoint : null;
+    }
+
+    function getRolesForAdaptation(adaptation) {
+        return adaptation.hasOwnProperty('Role_asArray') ? adaptation.Role_asArray : [];
+    }
+
+    function getAccessibilityForAdaptation(adaptation) {
+        return adaptation.hasOwnProperty('Accessibility_asArray') ? adaptation.Accessibility_asArray : [];
+    }
+
+    function getAudioChannelConfigurationForAdaptation(adaptation) {
+        return adaptation.hasOwnProperty('AudioChannelConfiguration_asArray') ? adaptation.AudioChannelConfiguration_asArray : [];
+    }
+
+    function getIsMain(adaptation) {
+        return getRolesForAdaptation(adaptation).filter(function (role) {
+            return role.value === 'main';
+        })[0];
+    }
+
+    function getRepresentationSortFunction() {
+        return function (a, b) {
+            return a.bandwidth - b.bandwidth;
+        };
+    }
+
+    function processAdaptation(adaptation) {
+        if (adaptation.Representation_asArray !== undefined && adaptation.Representation_asArray !== null) {
+            adaptation.Representation_asArray.sort(getRepresentationSortFunction());
+        }
+
+        return adaptation;
+    }
+
+    function getAdaptationForId(id, manifest, periodIndex) {
+
+        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
+        var i, len;
+
+        for (i = 0, len = adaptations.length; i < len; i++) {
+            if (adaptations[i].hasOwnProperty('id') && adaptations[i].id === id) {
+                return adaptations[i];
+            }
+        }
+
+        return null;
+    }
+
+    function getAdaptationForIndex(index, manifest, periodIndex) {
+        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
+        return adaptations[index];
+    }
+
+    function getIndexForAdaptation(adaptation, manifest, periodIndex) {
+
+        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
+        var i, len;
+
+        for (i = 0, len = adaptations.length; i < len; i++) {
+            if (adaptations[i] === adaptation) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    function getAdaptationsForType(manifest, periodIndex, type) {
+
+        var adaptationSet = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
+        var i, len;
+        var adaptations = [];
+
+        for (i = 0, len = adaptationSet.length; i < len; i++) {
+            if (getIsTypeOf(adaptationSet[i], type)) {
+                adaptations.push(processAdaptation(adaptationSet[i]));
+            }
+        }
+
+        return adaptations;
+    }
+
+    function getAdaptationForType(manifest, periodIndex, type, streamInfo) {
+
+        var adaptations = getAdaptationsForType(manifest, periodIndex, type);
+
+        if (!adaptations || adaptations.length === 0) return null;
+
+        if (adaptations.length > 1 && streamInfo) {
+            var currentTrack = mediaController.getCurrentTrackFor(type, streamInfo);
+            var allMediaInfoForType = adaptor.getAllMediaInfoForType(manifest, streamInfo, type);
+            for (var i = 0, ln = adaptations.length; i < ln; i++) {
+                if (currentTrack && mediaController.isTracksEqual(currentTrack, allMediaInfoForType[i])) {
+                    return adaptations[i];
+                }
+                if (getIsMain(adaptations[i])) {
+                    return adaptations[i];
                 }
             }
         }
 
-        if (switchRequest.value !== factory$11.NO_CHANGE && switchRequest.value !== current) {
-            log('BufferOccupancyRule requesting switch to index: ', switchRequest.value, 'type: ', mediaType, ' Priority: ', switchRequest.priority === factory$11.DEFAULT ? 'Default' : switchRequest.priority === factory$11.STRONG ? 'Strong' : 'Weak');
+        return adaptations[0];
+    }
+
+    function getCodec(adaptation) {
+        var representation = adaptation.Representation_asArray[0];
+        return representation.mimeType + ';codecs="' + representation.codecs + '"';
+    }
+
+    function getMimeType(adaptation) {
+        return adaptation.Representation_asArray[0].mimeType;
+    }
+
+    function getKID(adaptation) {
+        if (!adaptation || !adaptation.hasOwnProperty('cenc:default_KID')) {
+            return null;
+        }
+        return adaptation['cenc:default_KID'];
+    }
+
+    function getContentProtectionData(adaptation) {
+        if (!adaptation || !adaptation.hasOwnProperty('ContentProtection_asArray') || adaptation.ContentProtection_asArray.length === 0) {
+            return null;
+        }
+        return adaptation.ContentProtection_asArray;
+    }
+
+    function getIsDynamic(manifest) {
+        var isDynamic = false;
+        if (manifest.hasOwnProperty('type')) {
+            isDynamic = manifest.type === 'dynamic';
+        }
+        return isDynamic;
+    }
+
+    function getIsDVR(manifest) {
+        var isDynamic = getIsDynamic(manifest);
+        var containsDVR, isDVR;
+
+        containsDVR = !isNaN(manifest.timeShiftBufferDepth);
+        isDVR = isDynamic && containsDVR;
+
+        return isDVR;
+    }
+
+    function hasProfile(manifest, profile) {
+        var has = false;
+
+        if (manifest.profiles && manifest.profiles.length > 0) {
+            has = manifest.profiles.indexOf(profile) !== -1;
         }
 
-        callback(switchRequest);
+        return has;
     }
 
-    function reset() {
-        lastSwitchTime = 0;
+    function getIsOnDemand(manifest) {
+        return hasProfile(manifest, 'urn:mpeg:dash:profile:isoff-on-demand:2011');
     }
 
-    instance = {
-        execute: execute,
-        reset: reset
-    };
-
-    setup();
-
-    return instance;
-}
-
-BufferOccupancyRule.__dashjs_factory_name = 'BufferOccupancyRule';
-var BufferOccupancyRule$1 = FactoryMaker.getClassFactory(BufferOccupancyRule);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-function InsufficientBufferRule(config) {
-
-    var context = this.context;
-    var log = Debug$1(context).getInstance().log;
-    var eventBus = factory$3(context).getInstance();
-
-    var metricsModel = config.metricsModel;
-
-    var instance = void 0,
-        bufferStateDict = void 0,
-        lastSwitchTime = void 0,
-        waitToSwitchTime = void 0;
-
-    function setup() {
-        bufferStateDict = {};
-        lastSwitchTime = 0;
-        waitToSwitchTime = 1000;
-        eventBus.on(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
+    function getIsDVB(manifest) {
+        return hasProfile(manifest, 'urn:dvb:dash:profile:dvb-dash:2014');
     }
 
-    function execute(rulesContext, callback) {
-        var now = new Date().getTime();
-        var mediaType = rulesContext.getMediaInfo().type;
-        var current = rulesContext.getCurrentValue();
-        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-        var lastBufferStateVO = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: InsufficientBufferRule.__dashjs_factory_name });
-
-        if (now - lastSwitchTime < waitToSwitchTime || lastBufferStateVO === null) {
-            callback(switchRequest);
-            return;
-        }
-
-        setBufferInfo(mediaType, lastBufferStateVO.state);
-        // After the sessions first buffer loaded event , if we ever have a buffer empty event we want to switch all the way down.
-        if (lastBufferStateVO.state === factory$1.BUFFER_EMPTY && bufferStateDict[mediaType].firstBufferLoadedEvent !== undefined) {
-            switchRequest.value = 0;
-            switchRequest.priority = factory$11.STRONG;
-            switchRequest.reason.bufferState = lastBufferStateVO.state;
-
-            switchRequest = factory$11(context).create(0, factory$11.STRONG);
-        }
-
-        if (switchRequest.value !== factory$11.NO_CHANGE && switchRequest.value !== current) {
-            log('InsufficientBufferRule requesting switch to index: ', switchRequest.value, 'type: ', mediaType, ' Priority: ', switchRequest.priority === factory$11.DEFAULT ? 'Default' : switchRequest.priority === factory$11.STRONG ? 'Strong' : 'Weak');
-        }
-
-        lastSwitchTime = now;
-        callback(switchRequest);
-    }
-
-    function setBufferInfo(type, state) {
-        bufferStateDict[type] = bufferStateDict[type] || {};
-        bufferStateDict[type].state = state;
-        if (state === factory$1.BUFFER_LOADED && !bufferStateDict[type].firstBufferLoadedEvent) {
-            bufferStateDict[type].firstBufferLoadedEvent = true;
-        }
-    }
-
-    function onPlaybackSeeking() {
-        bufferStateDict = {};
-    }
-
-    function reset() {
-        eventBus.off(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
-        bufferStateDict = {};
-        lastSwitchTime = 0;
-    }
-
-    instance = {
-        execute: execute,
-        reset: reset
-    };
-
-    setup();
-
-    return instance;
-}
-
-InsufficientBufferRule.__dashjs_factory_name = 'InsufficientBufferRule';
-var InsufficientBufferRule$1 = FactoryMaker.getClassFactory(InsufficientBufferRule);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-function AbandonRequestsRule() {
-
-    var ABANDON_MULTIPLIER = 1.8;
-    var GRACE_TIME_THRESHOLD = 500;
-    var MIN_LENGTH_TO_AVERAGE = 5;
-
-    var context = this.context;
-    var log = Debug$1(context).getInstance().log;
-
-    var fragmentDict = void 0,
-        abandonDict = void 0,
-        throughputArray = void 0,
-        mediaPlayerModel = void 0;
-
-    function setup() {
-        fragmentDict = {};
-        abandonDict = {};
-        throughputArray = [];
-        mediaPlayerModel = factory$4(context).getInstance();
-    }
-
-    function setFragmentRequestDict(type, id) {
-        fragmentDict[type] = fragmentDict[type] || {};
-        fragmentDict[type][id] = fragmentDict[type][id] || {};
-    }
-
-    function storeLastRequestThroughputByType(type, throughput) {
-        throughputArray[type] = throughputArray[type] || [];
-        throughputArray[type].push(throughput);
-    }
-
-    function execute(rulesContext, callback) {
-
-        var mediaInfo = rulesContext.getMediaInfo();
-        var mediaType = mediaInfo.type;
-        var req = rulesContext.getCurrentValue().request;
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: AbandonRequestsRule.__dashjs_factory_name });
-
-        if (!isNaN(req.index)) {
-
-            setFragmentRequestDict(mediaType, req.index);
-
-            var fragmentInfo = fragmentDict[mediaType][req.index];
-            if (fragmentInfo === null || req.firstByteDate === null || abandonDict.hasOwnProperty(fragmentInfo.id)) {
-                callback(switchRequest);
-                return;
-            }
-
-            //setup some init info based on first progress event
-            if (fragmentInfo.firstByteTime === undefined) {
-                throughputArray[mediaType] = [];
-                fragmentInfo.firstByteTime = req.firstByteDate.getTime();
-                fragmentInfo.segmentDuration = req.duration;
-                fragmentInfo.bytesTotal = req.bytesTotal;
-                fragmentInfo.id = req.index;
-            }
-            fragmentInfo.bytesLoaded = req.bytesLoaded;
-            fragmentInfo.elapsedTime = new Date().getTime() - fragmentInfo.firstByteTime;
-
-            if (fragmentInfo.bytesLoaded > 0 && fragmentInfo.elapsedTime > 0) {
-                storeLastRequestThroughputByType(mediaType, Math.round(fragmentInfo.bytesLoaded * 8 / fragmentInfo.elapsedTime));
-            }
-
-            if (throughputArray[mediaType].length >= MIN_LENGTH_TO_AVERAGE && fragmentInfo.elapsedTime > GRACE_TIME_THRESHOLD && fragmentInfo.bytesLoaded < fragmentInfo.bytesTotal) {
-
-                var totalSampledValue = throughputArray[mediaType].reduce(function (a, b) {
-                    return a + b;
-                }, 0);
-                fragmentInfo.measuredBandwidthInKbps = Math.round(totalSampledValue / throughputArray[mediaType].length);
-                fragmentInfo.estimatedTimeOfDownload = (fragmentInfo.bytesTotal * 8 / fragmentInfo.measuredBandwidthInKbps / 1000).toFixed(2);
-                //log("id:",fragmentInfo.id, "kbps:", fragmentInfo.measuredBandwidthInKbps, "etd:",fragmentInfo.estimatedTimeOfDownload, fragmentInfo.bytesLoaded);
-
-                if (fragmentInfo.estimatedTimeOfDownload < fragmentInfo.segmentDuration * ABANDON_MULTIPLIER || rulesContext.getTrackInfo().quality === 0) {
-
-                    callback(switchRequest);
-                    return;
-                } else if (!abandonDict.hasOwnProperty(fragmentInfo.id)) {
-
-                    var abrController = rulesContext.getStreamProcessor().getABRController();
-                    var bytesRemaining = fragmentInfo.bytesTotal - fragmentInfo.bytesLoaded;
-                    var bitrateList = abrController.getBitrateList(mediaInfo);
-                    var newQuality = abrController.getQualityForBitrate(mediaInfo, fragmentInfo.measuredBandwidthInKbps * mediaPlayerModel.getBandwidthSafetyFactor());
-                    var estimateOtherBytesTotal = fragmentInfo.bytesTotal * bitrateList[newQuality].bitrate / bitrateList[abrController.getQualityFor(mediaType, mediaInfo.streamInfo)].bitrate;
-
-                    if (bytesRemaining > estimateOtherBytesTotal) {
-
-                        switchRequest.value = newQuality;
-                        switchRequest.priority = factory$11.STRONG;
-                        switchRequest.reason.throughput = fragmentInfo.measuredBandwidthInKbps;
-                        abandonDict[fragmentInfo.id] = fragmentInfo;
-                        log('AbandonRequestsRule ( ', mediaType, 'frag id', fragmentInfo.id, ') is asking to abandon and switch to quality to ', newQuality, ' measured bandwidth was', fragmentInfo.measuredBandwidthInKbps);
-                        delete fragmentDict[mediaType][fragmentInfo.id];
-                    }
-                }
-            } else if (fragmentInfo.bytesLoaded === fragmentInfo.bytesTotal) {
-                delete fragmentDict[mediaType][fragmentInfo.id];
-            }
-        }
-
-        callback(switchRequest);
-    }
-
-    function reset() {
-        setup();
-    }
-
-    var instance = {
-        execute: execute,
-        reset: reset
-    };
-
-    setup();
-
-    return instance;
-}
-
-AbandonRequestsRule.__dashjs_factory_name = 'AbandonRequestsRule';
-var AbandonRequestsRule$1 = FactoryMaker.getClassFactory(AbandonRequestsRule);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2016, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-
-// For a description of the BOLA adaptive bitrate (ABR) algorithm, see http://arxiv.org/abs/1601.06748
-
-// BOLA_STATE_ONE_BITRATE   : If there is only one bitrate (or initialization failed), always return NO_CHANGE.
-// BOLA_STATE_STARTUP       : Set placeholder buffer such that we download fragments at most recently measured throughput.
-// BOLA_STATE_STEADY        : Buffer primed, we switch to steady operation.
-// TODO: add BOLA_STATE_SEEK and tune Bola behavior on seeking
-var BOLA_STATE_ONE_BITRATE = 0;
-var BOLA_STATE_STARTUP = 1;
-var BOLA_STATE_STEADY = 2;
-var BOLA_DEBUG = false; // TODO: remove
-
-var MINIMUM_BUFFER_S = 10; // BOLA should never add artificial delays if buffer is less than MINIMUM_BUFFER_S.
-var BUFFER_TARGET_S = 30; // If Schedule Controller does not allow buffer level to reach BUFFER_TARGET_S, this can be a placeholder buffer level.
-var REBUFFER_SAFETY_FACTOR = 0.5; // Used when buffer level is dangerously low, might happen often in live streaming.
-
-function BolaRule(config) {
-
-    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE = 2;
-    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD = 3;
-
-    var context = this.context;
-    var log = Debug$1(context).getInstance().log;
-    var dashMetrics = config.dashMetrics;
-    var metricsModel = config.metricsModel;
-    var eventBus = factory$3(context).getInstance();
-
-    var instance = void 0,
-        lastCallTimeDict = void 0,
-        lastFragmentLoadedDict = void 0,
-        lastFragmentWasSwitchDict = void 0,
-        eventMediaTypes = void 0,
-        mediaPlayerModel = void 0,
-        playbackController = void 0,
-        adapter = void 0;
-
-    function setup() {
-        lastCallTimeDict = {};
-        lastFragmentLoadedDict = {};
-        lastFragmentWasSwitchDict = {};
-        eventMediaTypes = [];
-        mediaPlayerModel = factory$4(context).getInstance();
-        playbackController = PlaybackController$1(context).getInstance();
-        adapter = DashAdapter$1(context).getInstance();
-        eventBus.on(events.BUFFER_EMPTY, onBufferEmpty, instance);
-        eventBus.on(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
-        eventBus.on(events.PERIOD_SWITCH_STARTED, onPeriodSwitchStarted, instance);
-        eventBus.on(events.MEDIA_FRAGMENT_LOADED, onMediaFragmentLoaded, instance);
-    }
-
-    function utilitiesFromBitrates(bitrates) {
-        return bitrates.map(function (b) {
-            return Math.log(b);
-        });
-        // no need to worry about offset, any offset will be compensated for by gp
-    }
-
-    // NOTE: in live streaming, the real buffer level can drop below minimumBufferS, but bola should not stick to lowest bitrate by using a placeholder buffer level
-    function calculateParameters(minimumBufferS, bufferTargetS, bitrates, utilities) {
-        var highestUtilityIndex = NaN;
-        if (!utilities) {
-            utilities = utilitiesFromBitrates(bitrates);
-            highestUtilityIndex = utilities.length - 1;
+    function getDuration(manifest) {
+        var mpdDuration;
+        //@mediaPresentationDuration specifies the duration of the entire Media Presentation.
+        //If the attribute is not present, the duration of the Media Presentation is unknown.
+        if (manifest.hasOwnProperty('mediaPresentationDuration')) {
+            mpdDuration = manifest.mediaPresentationDuration;
         } else {
-            highestUtilityIndex = 0;
-            utilities.forEach(function (u, i) {
-                if (u > utilities[highestUtilityIndex]) highestUtilityIndex = i;
+            mpdDuration = Number.MAX_VALUE;
+        }
+
+        return mpdDuration;
+    }
+
+    function getBandwidth(representation) {
+        return representation.bandwidth;
+    }
+
+    function getManifestUpdatePeriod(manifest) {
+        var latencyOfLastUpdate = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+
+        var delay = NaN;
+        if (manifest.hasOwnProperty('minimumUpdatePeriod')) {
+            delay = manifest.minimumUpdatePeriod;
+        }
+        return isNaN(delay) ? delay : Math.max(delay - latencyOfLastUpdate, 1);
+    }
+
+    function getRepresentationCount(adaptation) {
+        return adaptation.Representation_asArray.length;
+    }
+
+    function getBitrateListForAdaptation(adaptation) {
+        if (!adaptation || !adaptation.Representation_asArray || !adaptation.Representation_asArray.length) return null;
+
+        var a = processAdaptation(adaptation);
+        var reps = a.Representation_asArray;
+        var ln = reps.length;
+        var bitrateList = [];
+
+        for (var i = 0; i < ln; i++) {
+            bitrateList.push({
+                bandwidth: reps[i].bandwidth,
+                width: reps[i].width || 0,
+                height: reps[i].height || 0
             });
         }
 
-        if (highestUtilityIndex === 0) {
-            // if highestUtilityIndex === 0, then always use lowest bitrate
-            return null;
-        }
-
-        // TODO: Investigate if following can be better if utilities are not the default Math.log utilities.
-        // If using Math.log utilities, we can choose Vp and gp to always prefer bitrates[0] at minimumBufferS and bitrates[max] at bufferTargetS.
-        // (Vp * (utility + gp) - bufferLevel) / bitrate has the maxima described when:
-        // Vp * (utilities[0] + gp - 1) = minimumBufferS and Vp * (utilities[max] + gp - 1) = bufferTargetS
-        // giving:
-        var gp = 1 - utilities[0] + (utilities[highestUtilityIndex] - utilities[0]) / (bufferTargetS / minimumBufferS - 1);
-        var Vp = minimumBufferS / (utilities[0] + gp - 1);
-
-        return { utilities: utilities, gp: gp, Vp: Vp };
+        return bitrateList;
     }
 
-    function calculateInitialState(rulesContext) {
-        var initialState = {};
+    function getRepresentationFor(index, adaptation) {
+        return adaptation.Representation_asArray[index];
+    }
 
-        var mediaInfo = rulesContext.getMediaInfo();
+    function getRepresentationsForAdaptation(manifest, adaptation) {
+        var a = processAdaptation(manifest.Period_asArray[adaptation.period.index].AdaptationSet_asArray[adaptation.index]);
+        var representations = [];
+        var representation, initialization, segmentInfo, r, s;
 
-        var streamProcessor = rulesContext.getStreamProcessor();
-        var streamInfo = rulesContext.getStreamInfo();
-        var trackInfo = rulesContext.getTrackInfo();
+        for (var i = 0; i < a.Representation_asArray.length; i++) {
+            r = a.Representation_asArray[i];
+            representation = new Representation();
+            representation.index = i;
+            representation.adaptation = adaptation;
 
-        var isDynamic = streamProcessor.isDynamic();
-        var duration = streamInfo.manifestInfo.duration;
-        var fragmentDuration = trackInfo.fragmentDuration;
-
-        var bitrates = mediaInfo.bitrateList.map(function (b) {
-            return b.bandwidth;
-        });
-        var params = calculateParameters(MINIMUM_BUFFER_S, BUFFER_TARGET_S, bitrates, null);
-        if (params === null) {
-            // The best soloution is to always use the lowest bitrate...
-            initialState.state = BOLA_STATE_ONE_BITRATE;
-            return initialState;
-        }
-
-        initialState.state = BOLA_STATE_STARTUP;
-
-        initialState.bitrates = bitrates;
-        initialState.utilities = params.utilities;
-        initialState.Vp = params.Vp;
-        initialState.gp = params.gp;
-
-        initialState.isDynamic = isDynamic;
-        initialState.movieDuration = duration;
-        initialState.fragmentDuration = fragmentDuration;
-        initialState.bandwidthSafetyFactor = mediaPlayerModel.getBandwidthSafetyFactor();
-        initialState.rebufferSafetyFactor = REBUFFER_SAFETY_FACTOR;
-        initialState.bufferTarget = mediaPlayerModel.getStableBufferTime();
-
-        initialState.lastQuality = 0;
-        initialState.placeholderBuffer = 0;
-        initialState.throughputCount = isDynamic ? AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE : AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD;
-
-        if (BOLA_DEBUG) {
-            var info = '';
-            for (var i = 0; i < bitrates.length; ++i) {
-                var u = params.utilities[i];
-                var b = bitrates[i];
-                var th = 0;
-                if (i > 0) {
-                    var u1 = params.utilities[i - 1];
-                    var b1 = bitrates[i - 1];
-                    th = params.Vp * ((u1 * b - u * b1) / (b - b1) + params.gp);
-                }
-                var z = params.Vp * (u + params.gp);
-                info += '\n' + i + ':' + (0.000001 * bitrates[i]).toFixed(3) + 'Mbps ' + th.toFixed(3) + '/' + z.toFixed(3);
+            if (r.hasOwnProperty('id')) {
+                representation.id = r.id;
             }
-            log('BolaDebug ' + mediaInfo.type + ' bitrates' + info);
-        }
 
-        return initialState;
-    }
-
-    function getQualityFromBufferLevel(bolaState, bufferLevel) {
-        var bitrateCount = bolaState.bitrates.length;
-        var quality = NaN;
-        var score = NaN;
-        for (var i = 0; i < bitrateCount; ++i) {
-            var s = (bolaState.Vp * (bolaState.utilities[i] + bolaState.gp) - bufferLevel) / bolaState.bitrates[i];
-            if (isNaN(score) || s >= score) {
-                score = s;
-                quality = i;
+            if (r.hasOwnProperty('bandwidth')) {
+                representation.bandwidth = r.bandwidth;
             }
-        }
-        return quality;
-    }
-
-    function getLastHttpRequests(metrics, count) {
-        var allHttpRequests = dashMetrics.getHttpRequests(metrics);
-        var httpRequests = [];
-
-        for (var i = allHttpRequests.length - 1; i >= 0 && httpRequests.length < count; --i) {
-            var request = allHttpRequests[i];
-            if (request.type === HTTPRequest.MEDIA_SEGMENT_TYPE && request._tfinish && request.tresponse && request.trace) {
-                httpRequests.push(request);
+            if (r.hasOwnProperty('maxPlayoutRate')) {
+                representation.maxPlayoutRate = r.maxPlayoutRate;
             }
-        }
+            if (r.hasOwnProperty('SegmentBase')) {
+                segmentInfo = r.SegmentBase;
+                representation.segmentInfoType = 'SegmentBase';
+            } else if (r.hasOwnProperty('SegmentList')) {
+                segmentInfo = r.SegmentList;
 
-        return httpRequests;
-    }
-
-    function getRecentThroughput(metrics, count, mediaType) {
-        // TODO: mediaType only used for debugging, remove it
-        var lastRequests = getLastHttpRequests(metrics, count);
-        if (lastRequests.length === 0) {
-            return 0;
-        }
-
-        var totalInverse = 0;
-        var msg = '';
-        for (var i = 0; i < lastRequests.length; ++i) {
-            // The RTT delay results in a lower throughput. We can avoid this delay in the calculation, but we do not want to.
-            var downloadSeconds = 0.001 * (lastRequests[i]._tfinish.getTime() - lastRequests[i].trequest.getTime());
-            var downloadBits = 8 * lastRequests[i].trace.reduce(function (prev, cur) {
-                return prev + cur.b[0];
-            }, 0);
-            if (BOLA_DEBUG) msg += ' ' + (0.000001 * downloadBits).toFixed(3) + '/' + downloadSeconds.toFixed(3) + '=' + (0.000001 * downloadBits / downloadSeconds).toFixed(3) + 'Mbps';
-            totalInverse += downloadSeconds / downloadBits;
-        }
-
-        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule recent throughput = ' + (lastRequests.length / (1000000 * totalInverse)).toFixed(3) + 'Mbps:' + msg);
-
-        return lastRequests.length / totalInverse;
-    }
-
-    function getQualityFromThroughput(bolaState, throughput) {
-        // do not factor in bandwidthSafetyFactor here - it is factored at point of function invocation
-
-        var q = 0;
-
-        bolaState.bitrates.some(function (value, index) {
-            if (value > throughput) {
-                return true;
-            }
-            q = index;
-            return false;
-        });
-
-        return q;
-    }
-
-    function getPlaceholderIncrementInSeconds(metrics, mediaType) {
-        // find out if there was delay because of
-        // 1. lack of availability in live streaming or
-        // 2. bufferLevel > bufferTarget or
-        // 3. fast switching
-
-        var nowMs = Date.now();
-        var lctMs = lastCallTimeDict[mediaType];
-        var wasSwitch = lastFragmentWasSwitchDict[mediaType];
-        var lastRequestFinishMs = NaN;
-
-        lastCallTimeDict[mediaType] = nowMs;
-        lastFragmentWasSwitchDict[mediaType] = false;
-
-        if (!wasSwitch) {
-            var lastRequests = getLastHttpRequests(metrics, 1);
-            if (lastRequests.length > 0) {
-                lastRequestFinishMs = lastRequests[0]._tfinish.getTime();
-                if (lastRequestFinishMs > nowMs) {
-                    // this shouldn't happen, try to handle gracefully
-                    lastRequestFinishMs = nowMs;
-                }
-            }
-        }
-
-        // return the time since the finish of the last request.
-        // The return will be added cumulatively to the placeholder buffer, so we must be sure not to add the same delay twice.
-
-        var delayMs = 0;
-        if (wasSwitch || lctMs > lastRequestFinishMs) {
-            delayMs = nowMs - lctMs;
-        } else {
-            delayMs = nowMs - lastRequestFinishMs;
-        }
-
-        if (isNaN(delayMs) || delayMs <= 0) return 0;
-        return 0.001 * delayMs;
-    }
-
-    function onBufferEmpty() {
-        if (BOLA_DEBUG) log('BolaDebug BUFFER_EMPTY');
-        // if we rebuffer, we don't want the placeholder buffer to artificially raise BOLA quality
-        eventMediaTypes.forEach(function (mediaType) {
-            var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-            if (metrics.BolaState.length !== 0) {
-                var bolaState = metrics.BolaState[0]._s;
-                if (bolaState.state === BOLA_STATE_STEADY) {
-                    bolaState.placeholderBuffer = 0;
-                    metricsModel.updateBolaState(mediaType, bolaState);
-                }
-            }
-        });
-    }
-
-    function onPlaybackSeeking(e) {
-        if (BOLA_DEBUG) log('BolaDebug PLAYBACK_SEEKING ' + e.seekTime.toFixed(3));
-        // TODO: 1. Verify what happens if we seek mid-fragment.
-        // TODO: 2. If e.g. we have 10s fragments and seek, we might want to download the first fragment at a lower quality to restart playback quickly.
-        eventMediaTypes.forEach(function (mediaType) {
-            var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-            if (metrics.BolaState.length !== 0) {
-                var bolaState = metrics.BolaState[0]._s;
-                if (bolaState.state !== BOLA_STATE_ONE_BITRATE) {
-                    bolaState.state = BOLA_STATE_STARTUP;
-                }
-                metricsModel.updateBolaState(mediaType, bolaState);
-            }
-        });
-
-        lastFragmentLoadedDict = {};
-        lastFragmentWasSwitchDict = {};
-    }
-
-    function onPeriodSwitchStarted() {
-        // TODO
-    }
-
-    function onMediaFragmentLoaded(e) {
-        if (e && e.chunk && e.chunk.mediaInfo) {
-            var type = e.chunk.mediaInfo.type;
-            var start = e.chunk.start;
-            if (type !== undefined && !isNaN(start)) {
-                if (start <= lastFragmentLoadedDict[type]) {
-                    lastFragmentWasSwitchDict[type] = true;
-                    // keep lastFragmentLoadedDict[type] e.g. last fragment start 10, switch fragment 8, last is still 10
+                if (segmentInfo.hasOwnProperty('SegmentTimeline')) {
+                    representation.segmentInfoType = 'SegmentTimeline';
+                    s = segmentInfo.SegmentTimeline.S_asArray[segmentInfo.SegmentTimeline.S_asArray.length - 1];
+                    if (!s.hasOwnProperty('r') || s.r >= 0) {
+                        representation.useCalculatedLiveEdgeTime = true;
+                    }
                 } else {
-                    // isNaN(lastFragmentLoadedDict[type]) also falls here
-                    lastFragmentWasSwitchDict[type] = false;
-                    lastFragmentLoadedDict[type] = start;
+                    representation.segmentInfoType = 'SegmentList';
+                    representation.useCalculatedLiveEdgeTime = true;
+                }
+            } else if (r.hasOwnProperty('SegmentTemplate')) {
+                segmentInfo = r.SegmentTemplate;
+
+                if (segmentInfo.hasOwnProperty('SegmentTimeline')) {
+                    representation.segmentInfoType = 'SegmentTimeline';
+                    s = segmentInfo.SegmentTimeline.S_asArray[segmentInfo.SegmentTimeline.S_asArray.length - 1];
+                    if (!s.hasOwnProperty('r') || s.r >= 0) {
+                        representation.useCalculatedLiveEdgeTime = true;
+                    }
+                } else {
+                    representation.segmentInfoType = 'SegmentTemplate';
+                }
+
+                if (segmentInfo.hasOwnProperty('initialization')) {
+                    representation.initialization = segmentInfo.initialization.split('$Bandwidth$').join(r.bandwidth).split('$RepresentationID$').join(r.id);
+                }
+            } else {
+                representation.segmentInfoType = 'BaseURL';
+            }
+
+            if (segmentInfo) {
+                if (segmentInfo.hasOwnProperty('Initialization')) {
+                    initialization = segmentInfo.Initialization;
+                    if (initialization.hasOwnProperty('sourceURL')) {
+                        representation.initialization = initialization.sourceURL;
+                    } else if (initialization.hasOwnProperty('range')) {
+                        representation.range = initialization.range;
+                        // initialization source url will be determined from
+                        // BaseURL when resolved at load time.
+                    }
+                } else if (r.hasOwnProperty('mimeType') && getIsTextTrack(r.mimeType)) {
+                    representation.range = 0;
+                }
+
+                if (segmentInfo.hasOwnProperty('timescale')) {
+                    representation.timescale = segmentInfo.timescale;
+                }
+                if (segmentInfo.hasOwnProperty('duration')) {
+                    // TODO according to the spec @maxSegmentDuration specifies the maximum duration of any Segment in any Representation in the Media Presentation
+                    // It is also said that for a SegmentTimeline any @d value shall not exceed the value of MPD@maxSegmentDuration, but nothing is said about
+                    // SegmentTemplate @duration attribute. We need to find out if @maxSegmentDuration should be used instead of calculated duration if the the duration
+                    // exceeds @maxSegmentDuration
+                    //representation.segmentDuration = Math.min(segmentInfo.duration / representation.timescale, adaptation.period.mpd.maxSegmentDuration);
+                    representation.segmentDuration = segmentInfo.duration / representation.timescale;
+                }
+                if (segmentInfo.hasOwnProperty('startNumber')) {
+                    representation.startNumber = segmentInfo.startNumber;
+                }
+                if (segmentInfo.hasOwnProperty('indexRange')) {
+                    representation.indexRange = segmentInfo.indexRange;
+                }
+                if (segmentInfo.hasOwnProperty('presentationTimeOffset')) {
+                    representation.presentationTimeOffset = segmentInfo.presentationTimeOffset / representation.timescale;
                 }
             }
+
+            representation.MSETimeOffset = timelineConverter.calcMSETimeOffset(representation);
+
+            representation.path = [adaptation.period.index, adaptation.index, i];
+
+            representations.push(representation);
         }
+
+        return representations;
     }
 
-    function execute(rulesContext, callback) {
-        var streamProcessor = rulesContext.getStreamProcessor();
-        streamProcessor.getScheduleController().setTimeToLoadDelay(0);
+    function getAdaptationsForPeriod(manifest, period) {
+        var p = manifest.Period_asArray[period.index];
+        var adaptations = [];
+        var adaptationSet, a;
 
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: BolaRule.__dashjs_factory_name });
+        for (var i = 0; i < p.AdaptationSet_asArray.length; i++) {
+            a = p.AdaptationSet_asArray[i];
+            adaptationSet = new AdaptationSet();
 
-        var mediaInfo = rulesContext.getMediaInfo();
-        var mediaType = mediaInfo.type;
-        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-
-        if (metrics.BolaState.length === 0) {
-            // initialization
-
-            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + '\nBolaDebug ' + mediaType + ' BolaRule for state=- fragmentStart=' + adapter.getIndexHandlerTime(rulesContext.getStreamProcessor()).toFixed(3));
-
-            var initState = calculateInitialState(rulesContext);
-            metricsModel.updateBolaState(mediaType, initState);
-
-            var q = 0;
-            if (initState.state !== BOLA_STATE_ONE_BITRATE) {
-                // initState.state === BOLA_STATE_STARTUP
-
-                eventMediaTypes.push(mediaType);
-
-                // Bola is not invoked by dash.js to determine the bitrate quality for the first fragment. We might estimate the throughput level here, but the metric related to the HTTP request for the first fragment is usually not available.
-                // TODO: at some point, we may want to consider a tweak that redownloads the first fragment at a higher quality
-
-                var initThroughput = getRecentThroughput(metrics, initState.throughputCount, mediaType);
-                if (initThroughput === 0) {
-                    // We don't have information about any download yet - let someone else decide quality.
-                    if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality unchanged for INITIALIZE');
-                    callback(switchRequest);
-                    return;
-                }
-                q = getQualityFromThroughput(initState, initThroughput * initState.bandwidthSafetyFactor);
-                initState.lastQuality = q;
-                switchRequest.value = q;
-                switchRequest.priority = factory$11.DEFAULT;
-                switchRequest.reason.state = initState.state;
-                switchRequest.reason.throughput = initThroughput;
+            if (a.hasOwnProperty('id')) {
+                adaptationSet.id = a.id;
             }
 
-            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + q + ' for INITIALIZE');
-            callback(switchRequest);
-            return;
-        } // initialization
+            adaptationSet.index = i;
+            adaptationSet.period = period;
 
-        // metrics.BolaState.length > 0
-        var bolaState = metrics.BolaState[0]._s;
-        // TODO: does changing bolaState conform to coding style, or should we clone?
+            if (getIsMuxed(a)) {
+                adaptationSet.type = 'muxed';
+            } else if (getIsAudio(a)) {
+                adaptationSet.type = 'audio';
+            } else if (getIsVideo(a)) {
+                adaptationSet.type = 'video';
+            } else if (getIsFragmentedText(a)) {
+                adaptationSet.type = 'fragmentedText';
+            } else {
+                adaptationSet.type = 'text';
+            }
 
-        if (bolaState.state === BOLA_STATE_ONE_BITRATE) {
-            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality 0 for ONE_BITRATE');
-            callback(switchRequest);
-            return;
+            adaptations.push(adaptationSet);
         }
 
-        var bitrates = bolaState.bitrates;
-        var utilities = bolaState.utilities;
+        return adaptations;
+    }
 
-        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + '\nBolaDebug ' + mediaType + ' EXECUTE BolaRule for state=' + bolaState.state + ' fragmentStart=' + adapter.getIndexHandlerTime(rulesContext.getStreamProcessor()).toFixed(3));
+    function getRegularPeriods(manifest, mpd) {
+        var isDynamic = getIsDynamic(manifest);
+        var periods = [];
+        var p1 = null;
+        var p = null;
+        var vo1 = null;
+        var vo = null;
+        var len, i;
 
-        var bufferLevel = dashMetrics.getCurrentBufferLevel(metrics) ? dashMetrics.getCurrentBufferLevel(metrics) : 0;
-        var recentThroughput = getRecentThroughput(metrics, bolaState.throughputCount, mediaType);
+        for (i = 0, len = manifest.Period_asArray.length; i < len; i++) {
+            p = manifest.Period_asArray[i];
 
-        if (bufferLevel <= 0.1) {
-            // rebuffering occurred, reset placeholder buffer
-            bolaState.placeholderBuffer = 0;
+            // If the attribute @start is present in the Period, then the
+            // Period is a regular Period and the PeriodStart is equal
+            // to the value of this attribute.
+            if (p.hasOwnProperty('start')) {
+                vo = new Period();
+                vo.start = p.start;
+            }
+            // If the @start attribute is absent, but the previous Period
+            // element contains a @duration attribute then then this new
+            // Period is also a regular Period. The start time of the new
+            // Period PeriodStart is the sum of the start time of the previous
+            // Period PeriodStart and the value of the attribute @duration
+            // of the previous Period.
+            else if (p1 !== null && p.hasOwnProperty('duration') && vo1 !== null) {
+                    vo = new Period();
+                    vo.start = vo1.start + vo1.duration;
+                    vo.duration = p.duration;
+                }
+                // If (i) @start attribute is absent, and (ii) the Period element
+                // is the first in the MPD, and (iii) the MPD@type is 'static',
+                // then the PeriodStart time shall be set to zero.
+                else if (i === 0 && !isDynamic) {
+                        vo = new Period();
+                        vo.start = 0;
+                    }
+
+            // The Period extends until the PeriodStart of the next Period.
+            // The difference between the PeriodStart time of a Period and
+            // the PeriodStart time of the following Period.
+            if (vo1 !== null && isNaN(vo1.duration)) {
+                vo1.duration = vo.start - vo1.start;
+            }
+
+            if (vo !== null) {
+                vo.id = getPeriodId(p, i);
+            }
+
+            if (vo !== null && p.hasOwnProperty('duration')) {
+                vo.duration = p.duration;
+            }
+
+            if (vo !== null) {
+                vo.index = i;
+                vo.mpd = mpd;
+                periods.push(vo);
+                p1 = p;
+                vo1 = vo;
+            }
+
+            p = null;
+            vo = null;
         }
 
-        // find out if there was delay because of lack of availability or because buffer level > bufferTarget or because of fast switching
-        var placeholderInc = getPlaceholderIncrementInSeconds(metrics, mediaType);
-        if (placeholderInc > 0) {
-            // TODO: maybe we should set some positive threshold here
-            bolaState.placeholderBuffer += placeholderInc;
-        }
-        if (bolaState.placeholderBuffer < 0) {
-            bolaState.placeholderBuffer = 0;
+        if (periods.length === 0) {
+            return periods;
         }
 
-        var effectiveBufferLevel = bufferLevel + bolaState.placeholderBuffer;
-        var bolaQuality = getQualityFromBufferLevel(bolaState, effectiveBufferLevel);
+        // The last Period extends until the end of the Media Presentation.
+        // The difference between the PeriodStart time of the last Period
+        // and the mpd duration
+        if (vo1 !== null && isNaN(vo1.duration)) {
+            vo1.duration = getEndTimeForLastPeriod(manifest, vo1) - vo1.start;
+        }
 
-        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule bufferLevel=' + bufferLevel.toFixed(3) + '(+' + bolaState.placeholderBuffer.toFixed(3) + '=' + effectiveBufferLevel.toFixed(3) + ') recentThroughput=' + (0.000001 * recentThroughput).toFixed(3) + ' tentativeQuality=' + bolaQuality);
+        return periods;
+    }
 
-        if (bolaState.state === BOLA_STATE_STARTUP) {
-            // in startup phase, use some throughput estimation
+    function getPeriodId(p, i) {
+        if (!p) {
+            throw new Error('Period cannot be null or undefined');
+        }
 
-            var _q = getQualityFromThroughput(bolaState, recentThroughput * bolaState.bandwidthSafetyFactor);
+        var id = Period.DEFAULT_ID + '_' + i;
 
-            if (bufferLevel > bolaState.fragmentDuration / REBUFFER_SAFETY_FACTOR) {
-                // only switch to steady state if we believe we have enough buffer to not trigger quality drop to a safeBitrate
-                bolaState.state = BOLA_STATE_STEADY;
+        if (p.hasOwnProperty('id') && p.id !== '__proto__') {
+            id = p.id;
+        }
 
-                var wantEffectiveBuffer = 0;
-                for (var i = 0; i < _q; ++i) {
-                    // We want minimum effective buffer (bufferLevel + placeholderBuffer) that gives a higher score for q when compared with any other i < q.
-                    // We want
-                    //     (Vp * (utilities[q] + gp) - bufferLevel) / bitrates[q]
-                    // to be >= any score for i < q.
-                    // We get score equality for q and i when:
-                    var b = bolaState.Vp * (bolaState.gp + (bitrates[_q] * utilities[i] - bitrates[i] * utilities[_q]) / (bitrates[_q] - bitrates[i]));
-                    if (b > wantEffectiveBuffer) {
-                        wantEffectiveBuffer = b;
+        return id;
+    }
+
+    function getMpd(manifest) {
+        var mpd = new Mpd();
+
+        mpd.manifest = manifest;
+
+        if (manifest.hasOwnProperty('availabilityStartTime')) {
+            mpd.availabilityStartTime = new Date(manifest.availabilityStartTime.getTime());
+        } else {
+            mpd.availabilityStartTime = new Date(manifest.loadedTime.getTime());
+        }
+
+        if (manifest.hasOwnProperty('availabilityEndTime')) {
+            mpd.availabilityEndTime = new Date(manifest.availabilityEndTime.getTime());
+        }
+
+        if (manifest.hasOwnProperty('minimumUpdatePeriod')) {
+            mpd.minimumUpdatePeriod = manifest.minimumUpdatePeriod;
+        }
+
+        if (manifest.hasOwnProperty('mediaPresentationDuration')) {
+            mpd.mediaPresentationDuration = manifest.mediaPresentationDuration;
+        }
+
+        if (manifest.hasOwnProperty('suggestedPresentationDelay')) {
+            mpd.suggestedPresentationDelay = manifest.suggestedPresentationDelay;
+        }
+
+        if (manifest.hasOwnProperty('timeShiftBufferDepth')) {
+            mpd.timeShiftBufferDepth = manifest.timeShiftBufferDepth;
+        }
+
+        if (manifest.hasOwnProperty('maxSegmentDuration')) {
+            mpd.maxSegmentDuration = manifest.maxSegmentDuration;
+        }
+
+        return mpd;
+    }
+
+    function getEndTimeForLastPeriod(manifest, period) {
+        var isDynamic = getIsDynamic(manifest);
+
+        var periodEnd = void 0;
+        if (manifest.mediaPresentationDuration) {
+            periodEnd = manifest.mediaPresentationDuration;
+        } else if (period.duration) {
+            periodEnd = period.duration;
+        } else if (isDynamic) {
+            periodEnd = Number.POSITIVE_INFINITY;
+        } else {
+            throw new Error('Must have @mediaPresentationDuratio on MPD or an explicit @duration on the last period.');
+        }
+
+        return periodEnd;
+    }
+
+    function getEventsForPeriod(manifest, period) {
+
+        var periodArray = manifest.Period_asArray;
+        var eventStreams = periodArray[period.index].EventStream_asArray;
+        var events = [];
+
+        if (eventStreams) {
+            for (var i = 0; i < eventStreams.length; i++) {
+                var eventStream = new EventStream();
+                eventStream.period = period;
+                eventStream.timescale = 1;
+
+                if (eventStreams[i].hasOwnProperty('schemeIdUri')) {
+                    eventStream.schemeIdUri = eventStreams[i].schemeIdUri;
+                } else {
+                    throw new Error('Invalid EventStream. SchemeIdUri has to be set');
+                }
+                if (eventStreams[i].hasOwnProperty('timescale')) {
+                    eventStream.timescale = eventStreams[i].timescale;
+                }
+                if (eventStreams[i].hasOwnProperty('value')) {
+                    eventStream.value = eventStreams[i].value;
+                }
+                for (var j = 0; j < eventStreams[i].Event_asArray.length; j++) {
+                    var event = new Event();
+                    event.presentationTime = 0;
+                    event.eventStream = eventStream;
+
+                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('presentationTime')) {
+                        event.presentationTime = eventStreams[i].Event_asArray[j].presentationTime;
+                    }
+                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('duration')) {
+                        event.duration = eventStreams[i].Event_asArray[j].duration;
+                    }
+                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('id')) {
+                        event.id = eventStreams[i].Event_asArray[j].id;
+                    }
+                    events.push(event);
+                }
+            }
+        }
+
+        return events;
+    }
+
+    function getEventStreams(inbandStreams, representation) {
+        var eventStreams = [];
+
+        if (!inbandStreams) return eventStreams;
+
+        for (var i = 0; i < inbandStreams.length; i++) {
+            var eventStream = new EventStream();
+            eventStream.timescale = 1;
+            eventStream.representation = representation;
+
+            if (inbandStreams[i].hasOwnProperty('schemeIdUri')) {
+                eventStream.schemeIdUri = inbandStreams[i].schemeIdUri;
+            } else {
+                throw new Error('Invalid EventStream. SchemeIdUri has to be set');
+            }
+            if (inbandStreams[i].hasOwnProperty('timescale')) {
+                eventStream.timescale = inbandStreams[i].timescale;
+            }
+            if (inbandStreams[i].hasOwnProperty('value')) {
+                eventStream.value = inbandStreams[i].value;
+            }
+            eventStreams.push(eventStream);
+        }
+
+        return eventStreams;
+    }
+
+    function getEventStreamForAdaptationSet(manifest, adaptation) {
+        var inbandStreams = manifest.Period_asArray[adaptation.period.index].AdaptationSet_asArray[adaptation.index].InbandEventStream_asArray;
+
+        return getEventStreams(inbandStreams, null);
+    }
+
+    function getEventStreamForRepresentation(manifest, representation) {
+        var inbandStreams = manifest.Period_asArray[representation.adaptation.period.index].AdaptationSet_asArray[representation.adaptation.index].Representation_asArray[representation.index].InbandEventStream_asArray;
+
+        return getEventStreams(inbandStreams, representation);
+    }
+
+    function getUTCTimingSources(manifest) {
+
+        var isDynamic = getIsDynamic(manifest);
+        var hasAST = manifest.hasOwnProperty('availabilityStartTime');
+        var utcTimingsArray = manifest.UTCTiming_asArray;
+        var utcTimingEntries = [];
+
+        // do not bother synchronizing the clock unless MPD is live,
+        // or it is static and has availabilityStartTime attribute
+        if (isDynamic || hasAST) {
+            if (utcTimingsArray) {
+                // the order is important here - 23009-1 states that the order
+                // in the manifest "indicates relative preference, first having
+                // the highest, and the last the lowest priority".
+                utcTimingsArray.forEach(function (utcTiming) {
+                    var entry = new UTCTiming();
+
+                    if (utcTiming.hasOwnProperty('schemeIdUri')) {
+                        entry.schemeIdUri = utcTiming.schemeIdUri;
+                    } else {
+                        // entries of type DescriptorType with no schemeIdUri
+                        // are meaningless. let's just ignore this entry and
+                        // move on.
+                        return;
+                    }
+
+                    // this is (incorrectly) interpreted as a number - schema
+                    // defines it as a string
+                    if (utcTiming.hasOwnProperty('value')) {
+                        entry.value = utcTiming.value.toString();
+                    } else {
+                        // without a value, there's not a lot we can do with
+                        // this entry. let's just ignore this one and move on
+                        return;
+                    }
+
+                    // we're not interested in the optional id or any other
+                    // attributes which might be attached to the entry
+
+                    utcTimingEntries.push(entry);
+                });
+            }
+        }
+
+        return utcTimingEntries;
+    }
+
+    function getBaseURLsFromElement(node) {
+        var baseUrls = [];
+        // if node.BaseURL_asArray and node.baseUri are undefined entries
+        // will be [undefined] which entries.some will just skip
+        var entries = node.BaseURL_asArray || [node.baseUri];
+        var earlyReturn = false;
+
+        entries.some(function (entry) {
+            if (entry) {
+                var baseUrl = new BaseURL();
+                var text = entry.__text || entry;
+
+                if (urlUtils.isRelative(text)) {
+                    // it doesn't really make sense to have relative and
+                    // absolute URLs at the same level, or multiple
+                    // relative URLs at the same level, so assume we are
+                    // done from this level of the MPD
+                    earlyReturn = true;
+
+                    // deal with the specific case where the MPD@BaseURL
+                    // is specified and is relative. when no MPD@BaseURL
+                    // entries exist, that case is handled by the
+                    // [node.baseUri] in the entries definition.
+                    if (node.baseUri) {
+                        text = node.baseUri + text;
                     }
                 }
-                if (wantEffectiveBuffer > bufferLevel) {
-                    bolaState.placeholderBuffer = wantEffectiveBuffer - bufferLevel;
+
+                baseUrl.url = text;
+
+                // serviceLocation is optional, but we need it in order
+                // to blacklist correctly. if it's not available, use
+                // anything unique since there's no relationship to any
+                // other BaseURL and, in theory, the url should be
+                // unique so use this instead.
+                if (entry.hasOwnProperty('serviceLocation') && entry.serviceLocation.length) {
+                    baseUrl.serviceLocation = entry.serviceLocation;
+                } else {
+                    baseUrl.serviceLocation = text;
                 }
-            }
 
-            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + _q + ' for STARTUP');
-            bolaState.lastQuality = _q;
-            metricsModel.updateBolaState(mediaType, bolaState);
-            switchRequest.value = _q;
-            switchRequest.priority = factory$11.DEFAULT;
-            switchRequest.reason.state = BOLA_STATE_STARTUP;
-            switchRequest.reason.throughput = recentThroughput;
-            callback(switchRequest);
-            return;
-        }
-
-        // steady state
-
-        // we want to avoid oscillations
-        // We implement the "BOLA-O" variant: when network bandwidth lies between two encoded bitrate levels, stick to the lowest level.
-        if (bolaQuality > bolaState.lastQuality) {
-            // do not multiply throughput by bandwidthSafetyFactor here: we are not using throughput estimation but capping bitrate to avoid oscillations
-            var _q2 = getQualityFromThroughput(bolaState, recentThroughput);
-            if (bolaQuality > _q2) {
-                // only intervene if we are trying to *increase* quality to an *unsustainable* level
-
-                if (_q2 < bolaState.lastQuality) {
-                    // we are only avoid oscillations - do not drop below last quality
-                    _q2 = bolaState.lastQuality;
+                if (entry.hasOwnProperty('dvb:priority')) {
+                    baseUrl.dvb_priority = entry['dvb:priority'];
                 }
-                // We are dropping to an encoding bitrate which is a little less than the network bandwidth because bitrate levels are discrete. Quality q might lead to buffer inflation, so we deflate buffer to the level that q gives postive utility. This delay will be added below.
-                bolaQuality = _q2;
+
+                if (entry.hasOwnProperty('dvb:weight')) {
+                    baseUrl.dvb_weight = entry['dvb:weight'];
+                }
+
+                /* NOTE: byteRange, availabilityTimeOffset,
+                 * availabilityTimeComplete currently unused
+                 */
+
+                baseUrls.push(baseUrl);
+
+                return earlyReturn;
             }
-        }
+        });
 
-        // Try to make sure that we can download a chunk without rebuffering. This is especially important for live streaming.
-        if (recentThroughput > 0) {
-            // We can only perform this check if we have a throughput estimate.
-            var safeBitrate = REBUFFER_SAFETY_FACTOR * recentThroughput * bufferLevel / bolaState.fragmentDuration;
-            while (bolaQuality > 0 && bitrates[bolaQuality] > safeBitrate) {
-                --bolaQuality;
-            }
-        }
-
-        // We do not want to overfill buffer with low quality chunks.
-        // Note that there will be no delay if buffer level is below MINIMUM_BUFFER_S, probably even with some margin higher than MINIMUM_BUFFER_S.
-        var delaySeconds = 0;
-        var wantBufferLevel = bolaState.Vp * (utilities[bolaQuality] + bolaState.gp);
-        delaySeconds = effectiveBufferLevel - wantBufferLevel;
-        if (delaySeconds > 0) {
-            // First reduce placeholder buffer.
-            // Note that this "delay" is the main mechanism of depleting placeholderBuffer - the real buffer is depleted by playback.
-            if (delaySeconds > bolaState.placeholderBuffer) {
-                delaySeconds -= bolaState.placeholderBuffer;
-                bolaState.placeholderBuffer = 0;
-            } else {
-                bolaState.placeholderBuffer -= delaySeconds;
-                delaySeconds = 0;
-            }
-        }
-        if (delaySeconds > 0) {
-            // After depleting all placeholder buffer, set delay.
-            if (bolaQuality === bitrates.length - 1) {
-                // At top quality, allow schedule controller to decide how far to fill buffer.
-                delaySeconds = 0;
-            } else {
-                streamProcessor.getScheduleController().setTimeToLoadDelay(1000 * delaySeconds);
-            }
-        } else {
-            delaySeconds = 0;
-        }
-
-        bolaState.lastQuality = bolaQuality;
-        metricsModel.updateBolaState(mediaType, bolaState);
-
-        switchRequest.value = bolaQuality;
-        switchRequest.priority = factory$11.DEFAULT;
-        switchRequest.reason.state = bolaState.state;
-        switchRequest.reason.throughput = recentThroughput;
-        switchRequest.reason.bufferLevel = bufferLevel;
-
-        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + bolaQuality + ' delay=' + delaySeconds.toFixed(3) + ' for STEADY');
-        callback(switchRequest);
+        return baseUrls;
     }
 
-    function reset() {
-        eventBus.off(events.BUFFER_EMPTY, onBufferEmpty, instance);
-        eventBus.off(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
-        eventBus.off(events.PERIOD_SWITCH_STARTED, onPeriodSwitchStarted, instance);
-        eventBus.off(events.MEDIA_FRAGMENT_LOADED, onMediaFragmentLoaded, instance);
-        setup();
+    function getLocation(manifest) {
+        if (manifest.hasOwnProperty('Location')) {
+            // for now, do not support multiple Locations -
+            // just set Location to the first Location.
+            manifest.Location = manifest.Location_asArray[0];
+        }
+
+        // may well be undefined
+        return manifest.Location;
     }
 
     instance = {
-        execute: execute,
-        reset: reset
+        getIsTypeOf: getIsTypeOf,
+        getIsAudio: getIsAudio,
+        getIsVideo: getIsVideo,
+        getIsText: getIsText,
+        getIsMuxed: getIsMuxed,
+        getIsTextTrack: getIsTextTrack,
+        getIsFragmentedText: getIsFragmentedText,
+        getIsMain: getIsMain,
+        getLanguageForAdaptation: getLanguageForAdaptation,
+        getViewpointForAdaptation: getViewpointForAdaptation,
+        getRolesForAdaptation: getRolesForAdaptation,
+        getAccessibilityForAdaptation: getAccessibilityForAdaptation,
+        getAudioChannelConfigurationForAdaptation: getAudioChannelConfigurationForAdaptation,
+        processAdaptation: processAdaptation,
+        getAdaptationForIndex: getAdaptationForIndex,
+        getIndexForAdaptation: getIndexForAdaptation,
+        getAdaptationForId: getAdaptationForId,
+        getAdaptationsForType: getAdaptationsForType,
+        getAdaptationForType: getAdaptationForType,
+        getCodec: getCodec,
+        getMimeType: getMimeType,
+        getKID: getKID,
+        getContentProtectionData: getContentProtectionData,
+        getIsDynamic: getIsDynamic,
+        getIsDVR: getIsDVR,
+        getIsOnDemand: getIsOnDemand,
+        getIsDVB: getIsDVB,
+        getDuration: getDuration,
+        getBandwidth: getBandwidth,
+        getManifestUpdatePeriod: getManifestUpdatePeriod,
+        getRepresentationCount: getRepresentationCount,
+        getBitrateListForAdaptation: getBitrateListForAdaptation,
+        getRepresentationFor: getRepresentationFor,
+        getRepresentationsForAdaptation: getRepresentationsForAdaptation,
+        getAdaptationsForPeriod: getAdaptationsForPeriod,
+        getRegularPeriods: getRegularPeriods,
+        getMpd: getMpd,
+        getEventsForPeriod: getEventsForPeriod,
+        getEventStreams: getEventStreams,
+        getEventStreamForAdaptationSet: getEventStreamForAdaptationSet,
+        getEventStreamForRepresentation: getEventStreamForRepresentation,
+        getUTCTimingSources: getUTCTimingSources,
+        getBaseURLsFromElement: getBaseURLsFromElement,
+        getRepresentationSortFunction: getRepresentationSortFunction,
+        getLocation: getLocation
     };
 
-    setup();
     return instance;
 }
 
-BolaRule.__dashjs_factory_name = 'BolaRule';
-var factory$13 = FactoryMaker.getClassFactory(BolaRule);
-factory$13.BOLA_STATE_ONE_BITRATE = BOLA_STATE_ONE_BITRATE;
-factory$13.BOLA_STATE_STARTUP = BOLA_STATE_STARTUP;
-factory$13.BOLA_STATE_STEADY = BOLA_STATE_STEADY;
-factory$13.BOLA_DEBUG = BOLA_DEBUG; // TODO: remove
+DashManifestModel.__dashjs_factory_name = 'DashManifestModel';
+var DashManifestModel$1 = FactoryMaker.getSingletonFactory(DashManifestModel);
 
 /**
  * The copyright in this software is being made available under the BSD License,
  * included below. This software may be subject to other third party and contributor
  * rights, including patent rights, and no such rights are granted under this license.
  *
- * Copyright (c) 2016, Dash Industry Forum.
+ * Copyright (c) 2013, Dash Industry Forum.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification,
@@ -8707,232 +9511,226 @@ factory$13.BOLA_DEBUG = BOLA_DEBUG; // TODO: remove
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-function BolaAbandonRule(config) {
 
-    // do not abandon during the grace period
-    var GRACE_PERIOD_MS = 500;
-    var POOR_LATENCY_MS = 200;
+function RulesContext(config) {
 
-    var context = this.context;
-    var log = Debug$1(context).getInstance().log;
-    var dashMetrics = config.dashMetrics;
-    var metricsModel = config.metricsModel;
+    var instance = void 0;
+    var representationInfo = config.streamProcessor.getCurrentRepresentationInfo();
+    var sp = config.streamProcessor;
+    var currentValue = config.currentValue;
+    var playbackIndex = config.playbackIndex;
+    var switchHistory = config.switchHistory;
+    var droppedFramesHistory = config.droppedFramesHistory;
+    var currentRequest = config.currentRequest;
+    var richBuffer = config.hasRichBuffer;
 
-    var instance = void 0,
-        abandonDict = void 0,
-        mediaPlayerModel = void 0;
-
-    function setup() {
-        abandonDict = {};
-        mediaPlayerModel = factory$4(context).getInstance();
+    function getStreamInfo() {
+        return representationInfo.mediaInfo.streamInfo;
     }
 
-    function rememberAbandon(mediaType, index, quality) {
-        // if this is called, then canStillAbandon(mediaType, index, quality) should have returned true
-        abandonDict[mediaType] = { index: index, quality: quality };
+    function getMediaInfo() {
+        return representationInfo.mediaInfo;
     }
 
-    function canAbandon(mediaType, index, quality) {
-        var a = abandonDict[mediaType];
-        if (!a) return true;
-        return index !== a.index || quality < a.quality;
+    function getTrackInfo() {
+        return representationInfo;
     }
 
-    function execute(rulesContext, callback) {
-        var mediaInfo = rulesContext.getMediaInfo();
-        var mediaType = mediaInfo.type;
-        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
-        var progressEvent = rulesContext.getCurrentValue();
-        var request = progressEvent.request;
-        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, factory$11.WEAK, { name: BolaAbandonRule.__dashjs_factory_name });
-
-        if (metrics.BolaState.length === 0) {
-            // should not arrive here - we shouldn't be downloading a fragment before BOLA is initialized
-            log('WARNING: executing BolaAbandonRule before initializing BolaRule');
-            abandonDict[mediaType] = null;
-            callback(switchRequest);
-            return;
-        }
-
-        var bolaState = metrics.BolaState[0]._s;
-        // TODO: does changing bolaState conform to coding style, or should we clone?
-
-        var index = request.index;
-        var quality = request.quality;
-
-        if (isNaN(index) || quality === 0 || !canAbandon(mediaType, index, quality) || !request.firstByteDate) {
-            callback(switchRequest);
-            return;
-        }
-
-        var nowMs = Date.now();
-        var elapsedTimeMs = nowMs - request.firstByteDate.getTime();
-
-        var bytesLoaded = request.bytesLoaded;
-        var bytesTotal = request.bytesTotal;
-        var bytesRemaining = bytesTotal - bytesLoaded;
-        var durationS = request.duration;
-
-        var bufferLevel = dashMetrics.getCurrentBufferLevel(metrics) ? dashMetrics.getCurrentBufferLevel(metrics) : 0.0;
-        var effectiveBufferLevel = bufferLevel + bolaState.placeholderBuffer;
-
-        var estimateThroughput = 8 * bytesLoaded / (0.001 * elapsedTimeMs); // throughput in bits per second
-        var estimateThroughputBSF = bolaState.bandwidthSafetyFactor * estimateThroughput;
-        var latencyS = 0.001 * (request.firstByteDate.getTime() - request.requestStartDate.getTime());
-        if (latencyS < 0.001 * POOR_LATENCY_MS) {
-            latencyS = 0.001 * POOR_LATENCY_MS;
-        }
-        var estimateTotalTimeS = latencyS + 8 * bytesTotal / estimateThroughputBSF;
-
-        var diagnosticMessage = '';
-        if (factory$13.BOLA_DEBUG) diagnosticMessage = 'index=' + index + ' quality=' + quality + ' bytesLoaded/bytesTotal=' + bytesLoaded + '/' + bytesTotal + ' bufferLevel=' + bufferLevel + ' timeSince1stByte=' + (elapsedTimeMs / 1000).toFixed(3) + ' estThroughput=' + (estimateThroughputBSF / 1000000).toFixed(3) + ' latency=' + latencyS.toFixed(3);
-
-        var estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[0] / bolaState.bitrates[quality];
-        var estimateBytesRemainingAfterLatency = bytesRemaining - latencyS * estimateThroughputBSF / 8;
-        if (estimateBytesRemainingAfterLatency < 1) {
-            estimateBytesRemainingAfterLatency = 1;
-        }
-
-        if (elapsedTimeMs < GRACE_PERIOD_MS || bytesRemaining <= estimateOtherBytesTotal || bufferLevel > bolaState.bufferTarget || estimateBytesRemainingAfterLatency <= estimateOtherBytesTotal || estimateTotalTimeS <= durationS) {
-            // Do not abandon during first GRACE_PERIOD_MS.
-            // Do not abandon if we need to download less bytes than the size of the lowest quality fragment.
-            // Do not abandon if buffer level is above bufferTarget because the schedule controller will not download anything anyway.
-            // Do not abandon if after latencyS bytesRemaining is estimated to drop below size of lowest quality fragment.
-            // Do not abandon if fragment takes less than 1 fragment duration to download.
-            callback(switchRequest);
-            return;
-        }
-
-        // If we abandon, there will be latencyS time before we get first byte at lower quality.
-        // By that time, the no-abandon option would have downloaded some more, and the buffer level would have depleted some more.
-        // Introducing this latencyS cushion also helps avoid extra abandonment, especially with close bitrates.
-
-        var effectiveBufferAfterLatency = effectiveBufferLevel - latencyS;
-        if (effectiveBufferAfterLatency < 0) {
-            effectiveBufferAfterLatency = 0;
-        }
-
-        // if we end up abandoning, we should not consider starting a download that would require more bytes than the remaining bytes in currently downloading fragment
-        var maxDroppedQuality = 0;
-        while (maxDroppedQuality + 1 < quality && bytesTotal * bolaState.bitrates[maxDroppedQuality + 1] / bolaState.bitrates[quality] < estimateBytesRemainingAfterLatency) {
-
-            ++maxDroppedQuality;
-        }
-
-        var newQuality = quality;
-
-        if (bolaState.state === factory$13.BOLA_STATE_STARTUP) {
-            // We are not yet using the BOLA buffer rules - use different abandonment logic.
-
-            // if we are here then we failed the test that estimateTotalTimeS <= durationS, so we abandon
-
-            // search for quality that matches the throughput
-            newQuality = 0;
-            for (var i = 0; i <= maxDroppedQuality; ++i) {
-                estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[i] / bolaState.bitrates[quality];
-                if (8 * estimateOtherBytesTotal / durationS > estimateThroughputBSF) {
-                    // chunks at quality i or higher need a greater throughput
-                    break;
-                }
-                newQuality = i;
-            }
-        } else {
-            // bolaState.state === BolaRule.BOLA_STATE_STEADY
-            // check if we should abandon using BOLA utility criteria
-
-            var score = (bolaState.Vp * (bolaState.utilities[quality] + bolaState.gp) - effectiveBufferAfterLatency) / estimateBytesRemainingAfterLatency;
-
-            for (var _i = 0; _i <= maxDroppedQuality; ++_i) {
-                estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[_i] / bolaState.bitrates[quality];
-                var s = (bolaState.Vp * (bolaState.utilities[_i] + bolaState.gp) - effectiveBufferAfterLatency) / estimateOtherBytesTotal;
-                if (s > score) {
-                    newQuality = _i;
-                    score = s;
-                }
-            }
-        }
-
-        // Perform check for rebuffer avoidance - now use real buffer level as opposed to effective buffer level.
-        var safeByteSize = bolaState.rebufferSafetyFactor * estimateThroughput * (bufferLevel - latencyS) / 8;
-
-        if (newQuality === quality && estimateBytesRemainingAfterLatency > safeByteSize) {
-            newQuality = maxDroppedQuality;
-        }
-
-        if (newQuality === quality) {
-            // no change
-            callback(switchRequest);
-            return;
-        }
-
-        // newQuality < quality, we are abandoning
-        while (newQuality > 0) {
-            estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[newQuality] / bolaState.bitrates[quality];
-            if (estimateOtherBytesTotal <= safeByteSize) {
-                break;
-            }
-            --newQuality;
-        }
-
-        // deflate placeholder buffer - we want to be conservative after abandoning
-        var wantBufferLevel = NaN;
-        if (newQuality > 0) {
-            // deflate to point where score for newQuality is just getting better than for (newQuality - 1)
-            var u = bolaState.utilities[newQuality];
-            var u1 = bolaState.utilities[newQuality - 1];
-            var _s = bolaState.bitrates[newQuality];
-            var s1 = bolaState.bitrates[newQuality - 1];
-            wantBufferLevel = bolaState.Vp * ((_s * u1 - s1 * u) / (_s - s1) + bolaState.gp);
-        } else {
-            // deflate to point where score for (newQuality + 1) is just getting better than for newQuality
-            var _u = bolaState.utilities[0];
-            var _u2 = bolaState.utilities[1];
-            var _s2 = bolaState.bitrates[0];
-            var _s3 = bolaState.bitrates[1];
-            wantBufferLevel = bolaState.Vp * ((_s2 * _u2 - _s3 * _u) / (_s2 - _s3) + bolaState.gp);
-            // then reduce one fragment duration to be conservative
-            wantBufferLevel -= durationS;
-        }
-        if (effectiveBufferLevel > wantBufferLevel) {
-            bolaState.placeholderBuffer = wantBufferLevel - bufferLevel;
-            if (bolaState.placeholderBuffer < 0) bolaState.placeholderBuffer = 0;
-        }
-
-        bolaState.lastQuality = newQuality;
-        metricsModel.updateBolaState(mediaType, bolaState);
-
-        if (factory$13.BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaAbandonRule abandon to ' + newQuality + ' - ' + diagnosticMessage);
-
-        rememberAbandon(mediaType, index, quality);
-        switchRequest.value = newQuality;
-        switchRequest.priority = factory$11.STRONG;
-        switchRequest.reason.state = bolaState.state;
-        switchRequest.reason.throughput = estimateThroughput;
-        switchRequest.reason.bufferLevel = bufferLevel;
-        // following entries used for tuning algorithm
-        switchRequest.reason.bytesLoaded = request.bytesLoaded;
-        switchRequest.reason.bytesTotal = request.bytesTotal;
-        switchRequest.reason.elapsedTimeMs = elapsedTimeMs;
-
-        callback(switchRequest);
+    function getCurrentValue() {
+        return currentValue;
     }
 
-    function reset() {
-        abandonDict = {};
+    function getManifestInfo() {
+        return representationInfo.mediaInfo.streamInfo.manifestInfo;
+    }
+
+    function getStreamProcessor() {
+        return sp;
+    }
+
+    function getPlaybackIndex() {
+        return playbackIndex;
+    }
+
+    function getSwitchHistory() {
+        return switchHistory;
+    }
+
+    function getDroppedFramesHistory() {
+        return droppedFramesHistory;
+    }
+
+    function getCurrentRequest() {
+        return currentRequest;
+    }
+
+    function hasRichBuffer() {
+        return richBuffer;
     }
 
     instance = {
-        execute: execute,
-        reset: reset
+        getCurrentValue: getCurrentValue,
+        getManifestInfo: getManifestInfo,
+        getMediaInfo: getMediaInfo,
+        getPlaybackIndex: getPlaybackIndex,
+        getDroppedFramesHistory: getDroppedFramesHistory,
+        getCurrentRequest: getCurrentRequest,
+        getSwitchHistory: getSwitchHistory,
+        getStreamInfo: getStreamInfo,
+        getStreamProcessor: getStreamProcessor,
+        getTrackInfo: getTrackInfo,
+        hasRichBuffer: hasRichBuffer
     };
-
-    setup();
 
     return instance;
 }
 
-BolaAbandonRule.__dashjs_factory_name = 'BolaAbandonRule';
-var BolaAbandonRule$1 = FactoryMaker.getClassFactory(BolaAbandonRule);
+RulesContext.__dashjs_factory_name = 'RulesContext';
+var RulesContext$1 = FactoryMaker.getClassFactory(RulesContext);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+
+var NO_CHANGE = -1;
+
+function SwitchRequest(v, r) {
+    //TODO refactor all the calls to this to use config to be like everything else.
+    var value = v === undefined ? NO_CHANGE : v;
+    var reason = r === undefined ? null : r;
+
+    var instance = {
+        value: value,
+        reason: reason
+    };
+
+    return instance;
+}
+
+SwitchRequest.__dashjs_factory_name = 'SwitchRequest';
+var factory$11 = FactoryMaker.getClassFactory(SwitchRequest);
+factory$11.NO_CHANGE = NO_CHANGE;
+
+var SWITCH_REQUEST_HISTORY_DEPTH = 8; // must be > SwitchHistoryRule SAMPLE_SIZE to enable rule
+
+function SwitchRequestHistory() {
+    var switchRequests = []; // running total
+    var srHistory = []; // history of each switch
+
+    function push(switchRequest) {
+        if (!switchRequests[switchRequest.oldValue]) {
+            switchRequests[switchRequest.oldValue] = { noDrops: 0, drops: 0, dropSize: 0 };
+        }
+
+        // Set switch details
+        var indexDiff = switchRequest.newValue - switchRequest.oldValue;
+        var drop = indexDiff < 0 ? 1 : 0;
+        var dropSize = drop ? -indexDiff : 0;
+        var noDrop = drop ? 0 : 1;
+
+        // Update running totals
+        switchRequests[switchRequest.oldValue].drops += drop;
+        switchRequests[switchRequest.oldValue].dropSize += dropSize;
+        switchRequests[switchRequest.oldValue].noDrops += noDrop;
+
+        // Save to history
+        srHistory.push({ idx: switchRequest.oldValue, noDrop: noDrop, drop: drop, dropSize: dropSize });
+
+        // Shift earliest switch off srHistory and readjust to keep depth of running totals constant
+        if (srHistory.length > SWITCH_REQUEST_HISTORY_DEPTH) {
+            var srHistoryFirst = srHistory.shift();
+            switchRequests[srHistoryFirst.idx].drops -= srHistoryFirst.drop;
+            switchRequests[srHistoryFirst.idx].dropSize -= srHistoryFirst.dropSize;
+            switchRequests[srHistoryFirst.idx].noDrops -= srHistoryFirst.noDrop;
+        }
+    }
+
+    function getSwitchRequests() {
+        return switchRequests;
+    }
+
+    function reset() {
+        switchRequests = [];
+        srHistory = [];
+    }
+
+    return {
+        push: push,
+        getSwitchRequests: getSwitchRequests,
+        reset: reset
+    };
+}
+
+SwitchRequestHistory.__dashjs_factory_name = 'SwitchRequestHistory';
+var factory$12 = FactoryMaker.getClassFactory(SwitchRequestHistory);
+
+function DroppedFramesHistory() {
+
+    var values = [];
+    var lastDroppedFrames = 0;
+    var lastTotalFrames = 0;
+
+    function push(index, playbackQuality) {
+        var intervalDroppedFrames = playbackQuality.droppedVideoFrames - lastDroppedFrames;
+        lastDroppedFrames = playbackQuality.droppedVideoFrames;
+
+        var intervalTotalFrames = playbackQuality.totalVideoFrames - lastTotalFrames;
+        lastTotalFrames = playbackQuality.totalVideoFrames;
+
+        if (!values[index]) {
+            values[index] = { droppedVideoFrames: intervalDroppedFrames, totalVideoFrames: intervalTotalFrames };
+        } else {
+            values[index].droppedVideoFrames += intervalDroppedFrames;
+            values[index].totalVideoFrames += intervalTotalFrames;
+        }
+    }
+
+    function getDroppedFrameHistory() {
+        return values;
+    }
+
+    function reset(playbackQuality) {
+        values = [];
+        lastDroppedFrames = playbackQuality.droppedVideoFrames;
+        lastTotalFrames = playbackQuality.totalVideoFrames;
+    }
+
+    return {
+        push: push,
+        getFrameHistory: getDroppedFrameHistory,
+        reset: reset
+    };
+}
+
+DroppedFramesHistory.__dashjs_factory_name = 'DroppedFramesHistory';
+var factory$13 = FactoryMaker.getClassFactory(DroppedFramesHistory);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -10141,1674 +10939,6 @@ function MetricsModel() {
 MetricsModel.__dashjs_factory_name = 'MetricsModel';
 var MetricsModel$1 = FactoryMaker.getSingletonFactory(MetricsModel);
 
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-function ManifestModel() {
-
-    var context = this.context;
-    var eventBus = factory$3(context).getInstance();
-
-    var instance = void 0,
-        manifest = void 0;
-
-    function getValue() {
-        return manifest;
-    }
-
-    function setValue(value) {
-        manifest = value;
-        if (value) {
-            eventBus.trigger(events.MANIFEST_LOADED, { data: value });
-        }
-    }
-
-    instance = {
-        getValue: getValue,
-        setValue: setValue
-    };
-
-    return instance;
-}
-
-ManifestModel.__dashjs_factory_name = 'ManifestModel';
-var ManifestModel$1 = FactoryMaker.getSingletonFactory(ManifestModel);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-var Representation = function Representation() {
-  classCallCheck(this, Representation);
-
-  this.id = null;
-  this.index = -1;
-  this.adaptation = null;
-  this.segmentInfoType = null;
-  this.initialization = null;
-  this.segmentDuration = NaN;
-  this.timescale = 1;
-  this.startNumber = 1;
-  this.indexRange = null;
-  this.range = null;
-  this.presentationTimeOffset = 0;
-  // Set the source buffer timeOffset to this
-  this.MSETimeOffset = NaN;
-  this.segmentAvailabilityRange = null;
-  this.availableSegmentsNumber = 0;
-  this.bandwidth = NaN;
-  this.maxPlayoutRate = NaN;
-};
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-var AdaptationSet = function AdaptationSet() {
-  classCallCheck(this, AdaptationSet);
-
-  this.period = null;
-  this.index = -1;
-  this.type = null;
-};
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-var Period = function Period() {
-  classCallCheck(this, Period);
-
-  this.id = null;
-  this.index = -1;
-  this.duration = NaN;
-  this.start = NaN;
-  this.mpd = null;
-};
-
-Period.DEFAULT_ID = 'defaultId';
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-var Mpd = function Mpd() {
-  classCallCheck(this, Mpd);
-
-  this.manifest = null;
-  this.suggestedPresentationDelay = 0;
-  this.availabilityStartTime = null;
-  this.availabilityEndTime = Number.POSITIVE_INFINITY;
-  this.timeShiftBufferDepth = Number.POSITIVE_INFINITY;
-  this.maxSegmentDuration = Number.POSITIVE_INFINITY;
-  this.minimumUpdatePeriod = NaN;
-  this.mediaPresentationDuration = NaN;
-};
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-function TimelineConverter() {
-
-    var context = this.context;
-    var eventBus = factory$3(context).getInstance();
-
-    var instance = void 0,
-        clientServerTimeShift = void 0,
-        isClientServerTimeSyncCompleted = void 0,
-        expectedLiveEdge = void 0;
-
-    function initialize() {
-
-        clientServerTimeShift = 0;
-        isClientServerTimeSyncCompleted = false;
-        expectedLiveEdge = NaN;
-        eventBus.on(events.TIME_SYNCHRONIZATION_COMPLETED, onTimeSyncComplete, this);
-    }
-
-    function isTimeSyncCompleted() {
-        return isClientServerTimeSyncCompleted;
-    }
-
-    function setTimeSyncCompleted(value) {
-        isClientServerTimeSyncCompleted = value;
-    }
-
-    function getClientTimeOffset() {
-        return clientServerTimeShift;
-    }
-
-    function getExpectedLiveEdge() {
-        return expectedLiveEdge;
-    }
-
-    function setExpectedLiveEdge(value) {
-        expectedLiveEdge = value;
-    }
-
-    function calcAvailabilityTimeFromPresentationTime(presentationTime, mpd, isDynamic, calculateEnd) {
-        var availabilityTime = NaN;
-
-        if (calculateEnd) {
-            //@timeShiftBufferDepth specifies the duration of the time shifting buffer that is guaranteed
-            // to be available for a Media Presentation with type 'dynamic'.
-            // When not present, the value is infinite.
-            if (isDynamic && mpd.timeShiftBufferDepth != Number.POSITIVE_INFINITY) {
-                availabilityTime = new Date(mpd.availabilityStartTime.getTime() + (presentationTime + mpd.timeShiftBufferDepth) * 1000);
-            } else {
-                availabilityTime = mpd.availabilityEndTime;
-            }
-        } else {
-            if (isDynamic) {
-                availabilityTime = new Date(mpd.availabilityStartTime.getTime() + (presentationTime - clientServerTimeShift) * 1000);
-            } else {
-                // in static mpd, all segments are available at the same time
-                availabilityTime = mpd.availabilityStartTime;
-            }
-        }
-
-        return availabilityTime;
-    }
-
-    function calcAvailabilityStartTimeFromPresentationTime(presentationTime, mpd, isDynamic) {
-        return calcAvailabilityTimeFromPresentationTime.call(this, presentationTime, mpd, isDynamic);
-    }
-
-    function calcAvailabilityEndTimeFromPresentationTime(presentationTime, mpd, isDynamic) {
-        return calcAvailabilityTimeFromPresentationTime.call(this, presentationTime, mpd, isDynamic, true);
-    }
-
-    function calcPresentationTimeFromWallTime(wallTime, period) {
-        //console.log("XXX", wallTime.getTime() - period.mpd.availabilityStartTime.getTime(), clientServerTimeShift * 1000, clientServerTimeShift, period.mpd.availabilityStartTime.getTime())
-        return (wallTime.getTime() - period.mpd.availabilityStartTime.getTime() + clientServerTimeShift * 1000) / 1000;
-    }
-
-    function calcPresentationTimeFromMediaTime(mediaTime, representation) {
-        var periodStart = representation.adaptation.period.start;
-        var presentationOffset = representation.presentationTimeOffset;
-
-        return mediaTime + (periodStart - presentationOffset);
-    }
-
-    function calcMediaTimeFromPresentationTime(presentationTime, representation) {
-        var periodStart = representation.adaptation.period.start;
-        var presentationOffset = representation.presentationTimeOffset;
-
-        return presentationTime - periodStart + presentationOffset;
-    }
-
-    function calcWallTimeForSegment(segment, isDynamic) {
-        var suggestedPresentationDelay, displayStartTime, wallTime;
-
-        if (isDynamic) {
-            suggestedPresentationDelay = segment.representation.adaptation.period.mpd.suggestedPresentationDelay;
-            displayStartTime = segment.presentationStartTime + suggestedPresentationDelay;
-            wallTime = new Date(segment.availabilityStartTime.getTime() + displayStartTime * 1000);
-        }
-
-        return wallTime;
-    }
-
-    function calcSegmentAvailabilityRange(representation, isDynamic) {
-
-        // Static Range Finder
-        var period = representation.adaptation.period;
-        var range = { start: period.start, end: period.start + period.duration };
-        if (!isDynamic) return range;
-
-        if (!isClientServerTimeSyncCompleted && representation.segmentAvailabilityRange) {
-            return representation.segmentAvailabilityRange;
-        }
-
-        //Dyanmic Range Finder
-        var d = representation.segmentDuration || (representation.segments && representation.segments.length ? representation.segments[representation.segments.length - 1].duration : 0);
-        var now = calcPresentationTimeFromWallTime(new Date(), period);
-        var periodEnd = period.start + period.duration;
-        range.start = Math.max(now - period.mpd.timeShiftBufferDepth, period.start);
-        range.end = now >= periodEnd && now - d < periodEnd ? periodEnd - d : now - d;
-
-        return range;
-    }
-
-    function calcPeriodRelativeTimeFromMpdRelativeTime(representation, mpdRelativeTime) {
-        var periodStartTime = representation.adaptation.period.start;
-        return mpdRelativeTime - periodStartTime;
-    }
-
-    function calcMpdRelativeTimeFromPeriodRelativeTime(representation, periodRelativeTime) {
-        var periodStartTime = representation.adaptation.period.start;
-
-        return periodRelativeTime + periodStartTime;
-    }
-
-    function onTimeSyncComplete(e) {
-        if (e.error) return;
-        clientServerTimeShift = e.offset / 1000;
-        isClientServerTimeSyncCompleted = true;
-    }
-
-    function calcMSETimeOffset(representation) {
-        // The MSEOffset is offset from AST for media. It is Period@start - presentationTimeOffset
-        var presentationOffset = representation.presentationTimeOffset;
-        var periodStart = representation.adaptation.period.start;
-        return periodStart - presentationOffset;
-    }
-
-    function reset() {
-        eventBus.off(events.TIME_SYNCHRONIZATION_COMPLETED, onTimeSyncComplete, this);
-        clientServerTimeShift = 0;
-        isClientServerTimeSyncCompleted = false;
-        expectedLiveEdge = NaN;
-    }
-
-    instance = {
-        initialize: initialize,
-        isTimeSyncCompleted: isTimeSyncCompleted,
-        setTimeSyncCompleted: setTimeSyncCompleted,
-        getClientTimeOffset: getClientTimeOffset,
-        getExpectedLiveEdge: getExpectedLiveEdge,
-        setExpectedLiveEdge: setExpectedLiveEdge,
-        calcAvailabilityStartTimeFromPresentationTime: calcAvailabilityStartTimeFromPresentationTime,
-        calcAvailabilityEndTimeFromPresentationTime: calcAvailabilityEndTimeFromPresentationTime,
-        calcPresentationTimeFromWallTime: calcPresentationTimeFromWallTime,
-        calcPresentationTimeFromMediaTime: calcPresentationTimeFromMediaTime,
-        calcPeriodRelativeTimeFromMpdRelativeTime: calcPeriodRelativeTimeFromMpdRelativeTime,
-        calcMpdRelativeTimeFromPeriodRelativeTime: calcMpdRelativeTimeFromPeriodRelativeTime,
-        calcMediaTimeFromPresentationTime: calcMediaTimeFromPresentationTime,
-        calcSegmentAvailabilityRange: calcSegmentAvailabilityRange,
-        calcWallTimeForSegment: calcWallTimeForSegment,
-        calcMSETimeOffset: calcMSETimeOffset,
-        reset: reset
-    };
-
-    return instance;
-}
-
-TimelineConverter.__dashjs_factory_name = 'TimelineConverter';
-var TimelineConverter$1 = FactoryMaker.getSingletonFactory(TimelineConverter);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-
-var DEFAULT_DVB_PRIORITY = 1;
-var DEFAULT_DVB_WEIGHT = 1;
-
-var BaseURL = function BaseURL(url, serviceLocation, priority, weight) {
-  classCallCheck(this, BaseURL);
-
-  this.url = url || '';
-  this.serviceLocation = serviceLocation || url || '';
-
-  // DVB extensions
-  this.dvb_priority = priority || DEFAULT_DVB_PRIORITY;
-  this.dvb_weight = weight || DEFAULT_DVB_WEIGHT;
-
-  /* currently unused:
-   * byteRange,
-   * availabilityTimeOffset,
-   * availabilityTimeComplete
-   */
-};
-
-BaseURL.DEFAULT_DVB_PRIORITY = DEFAULT_DVB_PRIORITY;
-BaseURL.DEFAULT_DVB_WEIGHT = DEFAULT_DVB_WEIGHT;
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- * @ignore
- */
-var EventStream = function EventStream() {
-  classCallCheck(this, EventStream);
-
-  this.adaptionSet = null;
-  this.representation = null;
-  this.period = null;
-  this.timescale = 1;
-  this.value = '';
-  this.schemeIdUri = '';
-};
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-
-/**
- * @module URLUtils
- * @description Provides utility functions for operating on URLs.
- * Initially this is simply a method to determine the Base URL of a URL, but
- * should probably include other things provided all over the place such as
- * determining whether a URL is relative/absolute, resolving two paths etc.
- */
-function URLUtils() {
-
-    var resolveFunction = void 0;
-
-    var schemeRegex = /^[a-z][a-z0-9+\-.]*:/i;
-    var httpUrlRegex = /^https?:\/\//i;
-    var originRegex = /^([a-z][a-z0-9+\-.]*:\/\/[^\/]+)\/?/i;
-
-    /**
-     * Resolves a url given an optional base url
-     * Uses window.URL to do the resolution.
-     *
-     * @param {string} url
-     * @param {string} [baseUrl]
-     * @return {string}
-     * @memberof module:URLUtils
-     * @instance
-     * @private
-     */
-    var nativeURLResolver = function nativeURLResolver(url, baseUrl) {
-        try {
-            // this will throw if baseurl is undefined, invalid etc
-            return new window.URL(url, baseUrl).toString();
-        } catch (e) {
-            return url;
-        }
-    };
-
-    /**
-     * Resolves a url given an optional base url
-     * Does not resolve ./, ../ etc but will do enough to construct something
-     * which will satisfy XHR etc when window.URL is not available ie
-     * IE11/node etc.
-     *
-     * @param {string} url
-     * @param {string} [baseUrl]
-     * @return {string}
-     * @memberof module:URLUtils
-     * @instance
-     * @private
-     */
-    var dumbURLResolver = function dumbURLResolver(url, baseUrl) {
-        var baseUrlParseFunc = parseBaseUrl;
-
-        if (!baseUrl) {
-            return url;
-        }
-
-        if (!isRelative(url)) {
-            return url;
-        }
-
-        if (isPathAbsolute(url)) {
-            baseUrlParseFunc = parseOrigin;
-        }
-
-        var base = baseUrlParseFunc(baseUrl);
-        var joinChar = base.charAt(base.length - 1) !== '/' && url.charAt(0) !== '/' ? '/' : '';
-
-        return [base, url].join(joinChar);
-    };
-
-    function setup() {
-        try {
-            var u = new window.URL('x', 'http://y'); //jshint ignore:line
-            resolveFunction = nativeURLResolver;
-        } catch (e) {
-            // must be IE11/Node etc
-        } finally {
-            resolveFunction = resolveFunction || dumbURLResolver;
-        }
-    }
-
-    /**
-     * Returns a string that contains the Base URL of a URL, if determinable.
-     * @param {string} url - full url
-     * @return {string}
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function parseBaseUrl(url) {
-        var slashIndex = url.indexOf('/');
-        var lastSlashIndex = url.lastIndexOf('/');
-
-        if (slashIndex !== -1) {
-            // if there is only '//'
-            if (lastSlashIndex === slashIndex + 1) {
-                return url;
-            }
-
-            if (url.indexOf('?') !== -1) {
-                url = url.substring(0, url.indexOf('?'));
-            }
-
-            return url.substring(0, lastSlashIndex + 1);
-        }
-
-        return '';
-    }
-
-    /**
-     * Returns a string that contains the scheme and origin of a URL,
-     * if determinable.
-     * @param {string} url - full url
-     * @return {string}
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function parseOrigin(url) {
-        var matches = url.match(originRegex);
-
-        if (matches) {
-            return matches[1];
-        }
-
-        return '';
-    }
-
-    /**
-     * Determines whether the url is relative.
-     * @return {bool}
-     * @param {string} url
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function isRelative(url) {
-        return !schemeRegex.test(url);
-    }
-
-    /**
-     * Determines whether the url is path-absolute.
-     * @return {bool}
-     * @param {string} url
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function isPathAbsolute(url) {
-        return isRelative(url) && url.charAt(0) === '/';
-    }
-
-    /**
-     * Determines whether the url is an HTTP-URL as defined in ISO/IEC
-     * 23009-1:2014 3.1.15. ie URL with a fixed scheme of http or https
-     * @return {bool}
-     * @param {string} url
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function isHTTPURL(url) {
-        return httpUrlRegex.test(url);
-    }
-
-    /**
-     * Resolves a url given an optional base url
-     * @return {string}
-     * @param {string} url
-     * @param {string} [baseUrl]
-     * @memberof module:URLUtils
-     * @instance
-     */
-    function resolve(url, baseUrl) {
-        return resolveFunction(url, baseUrl);
-    }
-
-    setup();
-
-    var instance = {
-        parseBaseUrl: parseBaseUrl,
-        parseOrigin: parseOrigin,
-        isRelative: isRelative,
-        isPathAbsolute: isPathAbsolute,
-        isHTTPURL: isHTTPURL,
-        resolve: resolve
-    };
-
-    return instance;
-}
-
-URLUtils.__dashjs_factory_name = 'URLUtils';
-var URLUtils$1 = FactoryMaker.getSingletonFactory(URLUtils);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-
-function DashManifestModel() {
-
-    var instance = void 0;
-    var context = this.context;
-    var timelineConverter = TimelineConverter$1(context).getInstance(); //TODO Need to pass this in not bake in
-    var mediaController = factory$6(context).getInstance();
-    var adaptor = DashAdapter$1(context).getInstance();
-
-    var urlUtils = URLUtils$1(context).getInstance();
-
-    function getIsTypeOf(adaptation, type) {
-
-        var i, len, representation;
-        var result = false;
-        var found = false;
-
-        var col = adaptation.ContentComponent_asArray;
-        var mimeTypeRegEx = type !== 'text' ? new RegExp(type) : new RegExp('(vtt|ttml)');
-
-        if (adaptation.Representation_asArray.length > 0 && adaptation.Representation_asArray[0].hasOwnProperty('codecs')) {
-            // Just check the start of the codecs string
-            var codecs = adaptation.Representation_asArray[0].codecs;
-            if (codecs.search('stpp') === 0 || codecs.search('wvtt') === 0) {
-                return type === 'fragmentedText';
-            }
-        }
-
-        if (col) {
-            if (col.length > 1) {
-                return type === 'muxed';
-            } else if (col[0] && col[0].contentType === type) {
-                result = true;
-                found = true;
-            }
-        }
-
-        if (adaptation.hasOwnProperty('mimeType')) {
-            result = mimeTypeRegEx.test(adaptation.mimeType);
-            found = true;
-        }
-
-        // couldn't find on adaptationset, so check a representation
-        if (!found) {
-            i = 0;
-            len = adaptation.Representation_asArray.length;
-            while (!found && i < len) {
-                representation = adaptation.Representation_asArray[i];
-
-                if (representation.hasOwnProperty('mimeType')) {
-                    result = mimeTypeRegEx.test(representation.mimeType);
-                    found = true;
-                }
-
-                i++;
-            }
-        }
-
-        return result;
-    }
-
-    function getIsAudio(adaptation) {
-        return getIsTypeOf(adaptation, 'audio');
-    }
-
-    function getIsVideo(adaptation) {
-        return getIsTypeOf(adaptation, 'video');
-    }
-
-    function getIsFragmentedText(adaptation) {
-        return getIsTypeOf(adaptation, 'fragmentedText');
-    }
-
-    function getIsText(adaptation) {
-        return getIsTypeOf(adaptation, 'text');
-    }
-
-    function getIsMuxed(adaptation) {
-        return getIsTypeOf(adaptation, 'muxed');
-    }
-
-    function getIsTextTrack(type) {
-        return type === 'text/vtt' || type === 'application/ttml+xml';
-    }
-
-    function getLanguageForAdaptation(adaptation) {
-        var lang = '';
-
-        if (adaptation.hasOwnProperty('lang')) {
-            //Filter out any other characters not allowed according to RFC5646
-            lang = adaptation.lang.replace(/[^A-Za-z0-9-]/g, '');
-        }
-
-        return lang;
-    }
-
-    function getViewpointForAdaptation(adaptation) {
-        return adaptation.hasOwnProperty('Viewpoint') ? adaptation.Viewpoint : null;
-    }
-
-    function getRolesForAdaptation(adaptation) {
-        return adaptation.hasOwnProperty('Role_asArray') ? adaptation.Role_asArray : [];
-    }
-
-    function getAccessibilityForAdaptation(adaptation) {
-        return adaptation.hasOwnProperty('Accessibility_asArray') ? adaptation.Accessibility_asArray : [];
-    }
-
-    function getAudioChannelConfigurationForAdaptation(adaptation) {
-        return adaptation.hasOwnProperty('AudioChannelConfiguration_asArray') ? adaptation.AudioChannelConfiguration_asArray : [];
-    }
-
-    function getIsMain(adaptation) {
-        return getRolesForAdaptation(adaptation).filter(function (role) {
-            return role.value === 'main';
-        })[0];
-    }
-
-    function getRepresentationSortFunction() {
-        return function (a, b) {
-            return a.bandwidth - b.bandwidth;
-        };
-    }
-
-    function processAdaptation(adaptation) {
-        if (adaptation.Representation_asArray !== undefined && adaptation.Representation_asArray !== null) {
-            adaptation.Representation_asArray.sort(getRepresentationSortFunction());
-        }
-
-        return adaptation;
-    }
-
-    function getAdaptationForId(id, manifest, periodIndex) {
-
-        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
-        var i, len;
-
-        for (i = 0, len = adaptations.length; i < len; i++) {
-            if (adaptations[i].hasOwnProperty('id') && adaptations[i].id === id) {
-                return adaptations[i];
-            }
-        }
-
-        return null;
-    }
-
-    function getAdaptationForIndex(index, manifest, periodIndex) {
-        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
-        return adaptations[index];
-    }
-
-    function getIndexForAdaptation(adaptation, manifest, periodIndex) {
-
-        var adaptations = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
-        var i, len;
-
-        for (i = 0, len = adaptations.length; i < len; i++) {
-            if (adaptations[i] === adaptation) {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    function getAdaptationsForType(manifest, periodIndex, type) {
-
-        var adaptationSet = manifest.Period_asArray[periodIndex].AdaptationSet_asArray;
-        var i, len;
-        var adaptations = [];
-
-        for (i = 0, len = adaptationSet.length; i < len; i++) {
-            if (getIsTypeOf(adaptationSet[i], type)) {
-                adaptations.push(processAdaptation(adaptationSet[i]));
-            }
-        }
-
-        return adaptations;
-    }
-
-    function getAdaptationForType(manifest, periodIndex, type, streamInfo) {
-
-        var adaptations = getAdaptationsForType(manifest, periodIndex, type);
-
-        if (!adaptations || adaptations.length === 0) return null;
-
-        if (adaptations.length > 1 && streamInfo) {
-            var currentTrack = mediaController.getCurrentTrackFor(type, streamInfo);
-            var allMediaInfoForType = adaptor.getAllMediaInfoForType(manifest, streamInfo, type);
-            for (var i = 0, ln = adaptations.length; i < ln; i++) {
-                if (currentTrack && mediaController.isTracksEqual(currentTrack, allMediaInfoForType[i])) {
-                    return adaptations[i];
-                }
-                if (getIsMain(adaptations[i])) {
-                    return adaptations[i];
-                }
-            }
-        }
-
-        return adaptations[0];
-    }
-
-    function getCodec(adaptation) {
-        var representation = adaptation.Representation_asArray[0];
-        return representation.mimeType + ';codecs="' + representation.codecs + '"';
-    }
-
-    function getMimeType(adaptation) {
-        return adaptation.Representation_asArray[0].mimeType;
-    }
-
-    function getKID(adaptation) {
-        if (!adaptation || !adaptation.hasOwnProperty('cenc:default_KID')) {
-            return null;
-        }
-        return adaptation['cenc:default_KID'];
-    }
-
-    function getContentProtectionData(adaptation) {
-        if (!adaptation || !adaptation.hasOwnProperty('ContentProtection_asArray') || adaptation.ContentProtection_asArray.length === 0) {
-            return null;
-        }
-        return adaptation.ContentProtection_asArray;
-    }
-
-    function getIsDynamic(manifest) {
-        var isDynamic = false;
-        if (manifest.hasOwnProperty('type')) {
-            isDynamic = manifest.type === 'dynamic';
-        }
-        return isDynamic;
-    }
-
-    function getIsDVR(manifest) {
-        var isDynamic = getIsDynamic(manifest);
-        var containsDVR, isDVR;
-
-        containsDVR = !isNaN(manifest.timeShiftBufferDepth);
-        isDVR = isDynamic && containsDVR;
-
-        return isDVR;
-    }
-
-    function hasProfile(manifest, profile) {
-        var has = false;
-
-        if (manifest.profiles && manifest.profiles.length > 0) {
-            has = manifest.profiles.indexOf(profile) !== -1;
-        }
-
-        return has;
-    }
-
-    function getIsOnDemand(manifest) {
-        return hasProfile(manifest, 'urn:mpeg:dash:profile:isoff-on-demand:2011');
-    }
-
-    function getIsDVB(manifest) {
-        return hasProfile(manifest, 'urn:dvb:dash:profile:dvb-dash:2014');
-    }
-
-    function getDuration(manifest) {
-        var mpdDuration;
-        //@mediaPresentationDuration specifies the duration of the entire Media Presentation.
-        //If the attribute is not present, the duration of the Media Presentation is unknown.
-        if (manifest.hasOwnProperty('mediaPresentationDuration')) {
-            mpdDuration = manifest.mediaPresentationDuration;
-        } else {
-            mpdDuration = Number.MAX_VALUE;
-        }
-
-        return mpdDuration;
-    }
-
-    function getBandwidth(representation) {
-        return representation.bandwidth;
-    }
-
-    function getManifestUpdatePeriod(manifest) {
-        var latencyOfLastUpdate = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
-
-        var delay = NaN;
-        if (manifest.hasOwnProperty('minimumUpdatePeriod')) {
-            delay = manifest.minimumUpdatePeriod;
-        }
-        return isNaN(delay) ? delay : Math.max(delay - latencyOfLastUpdate, 1);
-    }
-
-    function getRepresentationCount(adaptation) {
-        return adaptation.Representation_asArray.length;
-    }
-
-    function getBitrateListForAdaptation(adaptation) {
-        if (!adaptation || !adaptation.Representation_asArray || !adaptation.Representation_asArray.length) return null;
-
-        var a = processAdaptation(adaptation);
-        var reps = a.Representation_asArray;
-        var ln = reps.length;
-        var bitrateList = [];
-
-        for (var i = 0; i < ln; i++) {
-            bitrateList.push({
-                bandwidth: reps[i].bandwidth,
-                width: reps[i].width || 0,
-                height: reps[i].height || 0
-            });
-        }
-
-        return bitrateList;
-    }
-
-    function getRepresentationFor(index, adaptation) {
-        return adaptation.Representation_asArray[index];
-    }
-
-    function getRepresentationsForAdaptation(manifest, adaptation) {
-        var a = processAdaptation(manifest.Period_asArray[adaptation.period.index].AdaptationSet_asArray[adaptation.index]);
-        var representations = [];
-        var representation, initialization, segmentInfo, r, s;
-
-        for (var i = 0; i < a.Representation_asArray.length; i++) {
-            r = a.Representation_asArray[i];
-            representation = new Representation();
-            representation.index = i;
-            representation.adaptation = adaptation;
-
-            if (r.hasOwnProperty('id')) {
-                representation.id = r.id;
-            }
-
-            if (r.hasOwnProperty('bandwidth')) {
-                representation.bandwidth = r.bandwidth;
-            }
-            if (r.hasOwnProperty('maxPlayoutRate')) {
-                representation.maxPlayoutRate = r.maxPlayoutRate;
-            }
-            if (r.hasOwnProperty('SegmentBase')) {
-                segmentInfo = r.SegmentBase;
-                representation.segmentInfoType = 'SegmentBase';
-            } else if (r.hasOwnProperty('SegmentList')) {
-                segmentInfo = r.SegmentList;
-
-                if (segmentInfo.hasOwnProperty('SegmentTimeline')) {
-                    representation.segmentInfoType = 'SegmentTimeline';
-                    s = segmentInfo.SegmentTimeline.S_asArray[segmentInfo.SegmentTimeline.S_asArray.length - 1];
-                    if (!s.hasOwnProperty('r') || s.r >= 0) {
-                        representation.useCalculatedLiveEdgeTime = true;
-                    }
-                } else {
-                    representation.segmentInfoType = 'SegmentList';
-                    representation.useCalculatedLiveEdgeTime = true;
-                }
-            } else if (r.hasOwnProperty('SegmentTemplate')) {
-                segmentInfo = r.SegmentTemplate;
-
-                if (segmentInfo.hasOwnProperty('SegmentTimeline')) {
-                    representation.segmentInfoType = 'SegmentTimeline';
-                    s = segmentInfo.SegmentTimeline.S_asArray[segmentInfo.SegmentTimeline.S_asArray.length - 1];
-                    if (!s.hasOwnProperty('r') || s.r >= 0) {
-                        representation.useCalculatedLiveEdgeTime = true;
-                    }
-                } else {
-                    representation.segmentInfoType = 'SegmentTemplate';
-                }
-
-                if (segmentInfo.hasOwnProperty('initialization')) {
-                    representation.initialization = segmentInfo.initialization.split('$Bandwidth$').join(r.bandwidth).split('$RepresentationID$').join(r.id);
-                }
-            } else {
-                segmentInfo = r.BaseURL;
-                representation.segmentInfoType = 'BaseURL';
-            }
-
-            if (segmentInfo.hasOwnProperty('Initialization')) {
-                initialization = segmentInfo.Initialization;
-                if (initialization.hasOwnProperty('sourceURL')) {
-                    representation.initialization = initialization.sourceURL;
-                } else if (initialization.hasOwnProperty('range')) {
-                    representation.range = initialization.range;
-                    representation.initialization = r.BaseURL;
-                }
-            } else if (r.hasOwnProperty('mimeType') && getIsTextTrack(r.mimeType)) {
-                representation.range = 0;
-            }
-
-            if (segmentInfo.hasOwnProperty('timescale')) {
-                representation.timescale = segmentInfo.timescale;
-            }
-            if (segmentInfo.hasOwnProperty('duration')) {
-                // TODO according to the spec @maxSegmentDuration specifies the maximum duration of any Segment in any Representation in the Media Presentation
-                // It is also said that for a SegmentTimeline any @d value shall not exceed the value of MPD@maxSegmentDuration, but nothing is said about
-                // SegmentTemplate @duration attribute. We need to find out if @maxSegmentDuration should be used instead of calculated duration if the the duration
-                // exceeds @maxSegmentDuration
-                //representation.segmentDuration = Math.min(segmentInfo.duration / representation.timescale, adaptation.period.mpd.maxSegmentDuration);
-                representation.segmentDuration = segmentInfo.duration / representation.timescale;
-            }
-            if (segmentInfo.hasOwnProperty('startNumber')) {
-                representation.startNumber = segmentInfo.startNumber;
-            }
-            if (segmentInfo.hasOwnProperty('indexRange')) {
-                representation.indexRange = segmentInfo.indexRange;
-            }
-            if (segmentInfo.hasOwnProperty('presentationTimeOffset')) {
-                representation.presentationTimeOffset = segmentInfo.presentationTimeOffset / representation.timescale;
-            }
-
-            representation.MSETimeOffset = timelineConverter.calcMSETimeOffset(representation);
-
-            representation.path = [adaptation.period.index, adaptation.index, i];
-
-            representations.push(representation);
-        }
-
-        return representations;
-    }
-
-    function getAdaptationsForPeriod(manifest, period) {
-        var p = manifest.Period_asArray[period.index];
-        var adaptations = [];
-        var adaptationSet, a;
-
-        for (var i = 0; i < p.AdaptationSet_asArray.length; i++) {
-            a = p.AdaptationSet_asArray[i];
-            adaptationSet = new AdaptationSet();
-
-            if (a.hasOwnProperty('id')) {
-                adaptationSet.id = a.id;
-            }
-
-            adaptationSet.index = i;
-            adaptationSet.period = period;
-
-            if (getIsMuxed(a)) {
-                adaptationSet.type = 'muxed';
-            } else if (getIsAudio(a)) {
-                adaptationSet.type = 'audio';
-            } else if (getIsVideo(a)) {
-                adaptationSet.type = 'video';
-            } else if (getIsFragmentedText(a)) {
-                adaptationSet.type = 'fragmentedText';
-            } else {
-                adaptationSet.type = 'text';
-            }
-
-            adaptations.push(adaptationSet);
-        }
-
-        return adaptations;
-    }
-
-    function getRegularPeriods(manifest, mpd) {
-        var isDynamic = getIsDynamic(manifest);
-        var periods = [];
-        var p1 = null;
-        var p = null;
-        var vo1 = null;
-        var vo = null;
-        var len, i;
-
-        for (i = 0, len = manifest.Period_asArray.length; i < len; i++) {
-            p = manifest.Period_asArray[i];
-
-            // If the attribute @start is present in the Period, then the
-            // Period is a regular Period and the PeriodStart is equal
-            // to the value of this attribute.
-            if (p.hasOwnProperty('start')) {
-                vo = new Period();
-                vo.start = p.start;
-            }
-            // If the @start attribute is absent, but the previous Period
-            // element contains a @duration attribute then then this new
-            // Period is also a regular Period. The start time of the new
-            // Period PeriodStart is the sum of the start time of the previous
-            // Period PeriodStart and the value of the attribute @duration
-            // of the previous Period.
-            else if (p1 !== null && p.hasOwnProperty('duration') && vo1 !== null) {
-                    vo = new Period();
-                    vo.start = vo1.start + vo1.duration;
-                    vo.duration = p.duration;
-                }
-                // If (i) @start attribute is absent, and (ii) the Period element
-                // is the first in the MPD, and (iii) the MPD@type is 'static',
-                // then the PeriodStart time shall be set to zero.
-                else if (i === 0 && !isDynamic) {
-                        vo = new Period();
-                        vo.start = 0;
-                    }
-
-            // The Period extends until the PeriodStart of the next Period.
-            // The difference between the PeriodStart time of a Period and
-            // the PeriodStart time of the following Period.
-            if (vo1 !== null && isNaN(vo1.duration)) {
-                vo1.duration = vo.start - vo1.start;
-            }
-
-            if (vo !== null) {
-                vo.id = getPeriodId(p, i);
-            }
-
-            if (vo !== null && p.hasOwnProperty('duration')) {
-                vo.duration = p.duration;
-            }
-
-            if (vo !== null) {
-                vo.index = i;
-                vo.mpd = mpd;
-                periods.push(vo);
-                p1 = p;
-                vo1 = vo;
-            }
-
-            p = null;
-            vo = null;
-        }
-
-        if (periods.length === 0) {
-            return periods;
-        }
-
-        // The last Period extends until the end of the Media Presentation.
-        // The difference between the PeriodStart time of the last Period
-        // and the mpd duration
-        if (vo1 !== null && isNaN(vo1.duration)) {
-            vo1.duration = getEndTimeForLastPeriod(manifest, vo1) - vo1.start;
-        }
-
-        return periods;
-    }
-
-    function getPeriodId(p, i) {
-        if (!p) {
-            throw new Error('Period cannot be null or undefined');
-        }
-
-        var id = Period.DEFAULT_ID + '_' + i;
-
-        if (p.hasOwnProperty('id') && p.id !== '__proto__') {
-            id = p.id;
-        }
-
-        return id;
-    }
-
-    function getMpd(manifest) {
-        var mpd = new Mpd();
-
-        mpd.manifest = manifest;
-
-        if (manifest.hasOwnProperty('availabilityStartTime')) {
-            mpd.availabilityStartTime = new Date(manifest.availabilityStartTime.getTime());
-        } else {
-            mpd.availabilityStartTime = new Date(manifest.loadedTime.getTime());
-        }
-
-        if (manifest.hasOwnProperty('availabilityEndTime')) {
-            mpd.availabilityEndTime = new Date(manifest.availabilityEndTime.getTime());
-        }
-
-        if (manifest.hasOwnProperty('minimumUpdatePeriod')) {
-            mpd.minimumUpdatePeriod = manifest.minimumUpdatePeriod;
-        }
-
-        if (manifest.hasOwnProperty('mediaPresentationDuration')) {
-            mpd.mediaPresentationDuration = manifest.mediaPresentationDuration;
-        }
-
-        if (manifest.hasOwnProperty('suggestedPresentationDelay')) {
-            mpd.suggestedPresentationDelay = manifest.suggestedPresentationDelay;
-        }
-
-        if (manifest.hasOwnProperty('timeShiftBufferDepth')) {
-            mpd.timeShiftBufferDepth = manifest.timeShiftBufferDepth;
-        }
-
-        if (manifest.hasOwnProperty('maxSegmentDuration')) {
-            mpd.maxSegmentDuration = manifest.maxSegmentDuration;
-        }
-
-        return mpd;
-    }
-
-    function getEndTimeForLastPeriod(manifest, period) {
-        var isDynamic = getIsDynamic(manifest);
-
-        var periodEnd = void 0;
-        if (manifest.mediaPresentationDuration) {
-            periodEnd = manifest.mediaPresentationDuration;
-        } else if (period.duration) {
-            periodEnd = period.duration;
-        } else if (isDynamic) {
-            periodEnd = Number.POSITIVE_INFINITY;
-        } else {
-            throw new Error('Must have @mediaPresentationDuratio on MPD or an explicit @duration on the last period.');
-        }
-
-        return periodEnd;
-    }
-
-    function getEventsForPeriod(manifest, period) {
-
-        var periodArray = manifest.Period_asArray;
-        var eventStreams = periodArray[period.index].EventStream_asArray;
-        var events = [];
-
-        if (eventStreams) {
-            for (var i = 0; i < eventStreams.length; i++) {
-                var eventStream = new EventStream();
-                eventStream.period = period;
-                eventStream.timescale = 1;
-
-                if (eventStreams[i].hasOwnProperty('schemeIdUri')) {
-                    eventStream.schemeIdUri = eventStreams[i].schemeIdUri;
-                } else {
-                    throw new Error('Invalid EventStream. SchemeIdUri has to be set');
-                }
-                if (eventStreams[i].hasOwnProperty('timescale')) {
-                    eventStream.timescale = eventStreams[i].timescale;
-                }
-                if (eventStreams[i].hasOwnProperty('value')) {
-                    eventStream.value = eventStreams[i].value;
-                }
-                for (var j = 0; j < eventStreams[i].Event_asArray.length; j++) {
-                    var event = new Event();
-                    event.presentationTime = 0;
-                    event.eventStream = eventStream;
-
-                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('presentationTime')) {
-                        event.presentationTime = eventStreams[i].Event_asArray[j].presentationTime;
-                    }
-                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('duration')) {
-                        event.duration = eventStreams[i].Event_asArray[j].duration;
-                    }
-                    if (eventStreams[i].Event_asArray[j].hasOwnProperty('id')) {
-                        event.id = eventStreams[i].Event_asArray[j].id;
-                    }
-                    events.push(event);
-                }
-            }
-        }
-
-        return events;
-    }
-
-    function getEventStreams(inbandStreams, representation) {
-        var eventStreams = [];
-
-        if (!inbandStreams) return eventStreams;
-
-        for (var i = 0; i < inbandStreams.length; i++) {
-            var eventStream = new EventStream();
-            eventStream.timescale = 1;
-            eventStream.representation = representation;
-
-            if (inbandStreams[i].hasOwnProperty('schemeIdUri')) {
-                eventStream.schemeIdUri = inbandStreams[i].schemeIdUri;
-            } else {
-                throw new Error('Invalid EventStream. SchemeIdUri has to be set');
-            }
-            if (inbandStreams[i].hasOwnProperty('timescale')) {
-                eventStream.timescale = inbandStreams[i].timescale;
-            }
-            if (inbandStreams[i].hasOwnProperty('value')) {
-                eventStream.value = inbandStreams[i].value;
-            }
-            eventStreams.push(eventStream);
-        }
-
-        return eventStreams;
-    }
-
-    function getEventStreamForAdaptationSet(manifest, adaptation) {
-        var inbandStreams = manifest.Period_asArray[adaptation.period.index].AdaptationSet_asArray[adaptation.index].InbandEventStream_asArray;
-
-        return getEventStreams(inbandStreams, null);
-    }
-
-    function getEventStreamForRepresentation(manifest, representation) {
-        var inbandStreams = manifest.Period_asArray[representation.adaptation.period.index].AdaptationSet_asArray[representation.adaptation.index].Representation_asArray[representation.index].InbandEventStream_asArray;
-
-        return getEventStreams(inbandStreams, representation);
-    }
-
-    function getUTCTimingSources(manifest) {
-
-        var isDynamic = getIsDynamic(manifest);
-        var hasAST = manifest.hasOwnProperty('availabilityStartTime');
-        var utcTimingsArray = manifest.UTCTiming_asArray;
-        var utcTimingEntries = [];
-
-        // do not bother synchronizing the clock unless MPD is live,
-        // or it is static and has availabilityStartTime attribute
-        if (isDynamic || hasAST) {
-            if (utcTimingsArray) {
-                // the order is important here - 23009-1 states that the order
-                // in the manifest "indicates relative preference, first having
-                // the highest, and the last the lowest priority".
-                utcTimingsArray.forEach(function (utcTiming) {
-                    var entry = new UTCTiming();
-
-                    if (utcTiming.hasOwnProperty('schemeIdUri')) {
-                        entry.schemeIdUri = utcTiming.schemeIdUri;
-                    } else {
-                        // entries of type DescriptorType with no schemeIdUri
-                        // are meaningless. let's just ignore this entry and
-                        // move on.
-                        return;
-                    }
-
-                    // this is (incorrectly) interpreted as a number - schema
-                    // defines it as a string
-                    if (utcTiming.hasOwnProperty('value')) {
-                        entry.value = utcTiming.value.toString();
-                    } else {
-                        // without a value, there's not a lot we can do with
-                        // this entry. let's just ignore this one and move on
-                        return;
-                    }
-
-                    // we're not interested in the optional id or any other
-                    // attributes which might be attached to the entry
-
-                    utcTimingEntries.push(entry);
-                });
-            }
-        }
-
-        return utcTimingEntries;
-    }
-
-    function getBaseURLsFromElement(node) {
-        var baseUrls = [];
-        // if node.BaseURL_asArray and node.baseUri are undefined entries
-        // will be [undefined] which entries.some will just skip
-        var entries = node.BaseURL_asArray || [node.baseUri];
-        var earlyReturn = false;
-
-        entries.some(function (entry) {
-            if (entry) {
-                var baseUrl = new BaseURL();
-                var text = entry.__text || entry;
-
-                if (urlUtils.isRelative(text)) {
-                    // it doesn't really make sense to have relative and
-                    // absolute URLs at the same level, or multiple
-                    // relative URLs at the same level, so assume we are
-                    // done from this level of the MPD
-                    earlyReturn = true;
-
-                    // deal with the specific case where the MPD@BaseURL
-                    // is specified and is relative. when no MPD@BaseURL
-                    // entries exist, that case is handled by the
-                    // [node.baseUri] in the entries definition.
-                    if (node.baseUri) {
-                        text = node.baseUri + text;
-                    }
-                }
-
-                baseUrl.url = text;
-
-                // serviceLocation is optional, but we need it in order
-                // to blacklist correctly. if it's not available, use
-                // anything unique since there's no relationship to any
-                // other BaseURL and, in theory, the url should be
-                // unique so use this instead.
-                if (entry.hasOwnProperty('serviceLocation') && entry.serviceLocation.length) {
-                    baseUrl.serviceLocation = entry.serviceLocation;
-                } else {
-                    baseUrl.serviceLocation = text;
-                }
-
-                if (entry.hasOwnProperty('dvb:priority')) {
-                    baseUrl.dvb_priority = entry['dvb:priority'];
-                }
-
-                if (entry.hasOwnProperty('dvb:weight')) {
-                    baseUrl.dvb_weight = entry['dvb:weight'];
-                }
-
-                /* NOTE: byteRange, availabilityTimeOffset,
-                 * availabilityTimeComplete currently unused
-                 */
-
-                baseUrls.push(baseUrl);
-
-                return earlyReturn;
-            }
-        });
-
-        return baseUrls;
-    }
-
-    function getLocation(manifest) {
-        if (manifest.hasOwnProperty('Location')) {
-            // for now, do not support multiple Locations -
-            // just set Location to the first Location.
-            manifest.Location = manifest.Location_asArray[0];
-        }
-
-        // may well be undefined
-        return manifest.Location;
-    }
-
-    instance = {
-        getIsTypeOf: getIsTypeOf,
-        getIsAudio: getIsAudio,
-        getIsVideo: getIsVideo,
-        getIsText: getIsText,
-        getIsMuxed: getIsMuxed,
-        getIsTextTrack: getIsTextTrack,
-        getIsFragmentedText: getIsFragmentedText,
-        getIsMain: getIsMain,
-        getLanguageForAdaptation: getLanguageForAdaptation,
-        getViewpointForAdaptation: getViewpointForAdaptation,
-        getRolesForAdaptation: getRolesForAdaptation,
-        getAccessibilityForAdaptation: getAccessibilityForAdaptation,
-        getAudioChannelConfigurationForAdaptation: getAudioChannelConfigurationForAdaptation,
-        processAdaptation: processAdaptation,
-        getAdaptationForIndex: getAdaptationForIndex,
-        getIndexForAdaptation: getIndexForAdaptation,
-        getAdaptationForId: getAdaptationForId,
-        getAdaptationsForType: getAdaptationsForType,
-        getAdaptationForType: getAdaptationForType,
-        getCodec: getCodec,
-        getMimeType: getMimeType,
-        getKID: getKID,
-        getContentProtectionData: getContentProtectionData,
-        getIsDynamic: getIsDynamic,
-        getIsDVR: getIsDVR,
-        getIsOnDemand: getIsOnDemand,
-        getIsDVB: getIsDVB,
-        getDuration: getDuration,
-        getBandwidth: getBandwidth,
-        getManifestUpdatePeriod: getManifestUpdatePeriod,
-        getRepresentationCount: getRepresentationCount,
-        getBitrateListForAdaptation: getBitrateListForAdaptation,
-        getRepresentationFor: getRepresentationFor,
-        getRepresentationsForAdaptation: getRepresentationsForAdaptation,
-        getAdaptationsForPeriod: getAdaptationsForPeriod,
-        getRegularPeriods: getRegularPeriods,
-        getMpd: getMpd,
-        getEventsForPeriod: getEventsForPeriod,
-        getEventStreams: getEventStreams,
-        getEventStreamForAdaptationSet: getEventStreamForAdaptationSet,
-        getEventStreamForRepresentation: getEventStreamForRepresentation,
-        getUTCTimingSources: getUTCTimingSources,
-        getBaseURLsFromElement: getBaseURLsFromElement,
-        getRepresentationSortFunction: getRepresentationSortFunction,
-        getLocation: getLocation
-    };
-
-    return instance;
-}
-
-DashManifestModel.__dashjs_factory_name = 'DashManifestModel';
-var DashManifestModel$1 = FactoryMaker.getSingletonFactory(DashManifestModel);
-
 var round10 = createCommonjsModule(function (module, exports) {
     /**
      * Decimal adjustment of a number.
@@ -12167,7 +11297,10 @@ function DashMetrics() {
         if (!headerStr) {
             return headers;
         }
-        var headerPairs = headerStr.split('\r\n');
+
+        // Trim headerStr to fix a MS Edge bug with xhr.getAllResponseHeaders method
+        // which send a string starting with a "\n" character
+        var headerPairs = headerStr.trim().split('\r\n');
         for (var i = 0, ilen = headerPairs.length; i < ilen; i++) {
             var headerPair = headerPairs[i];
             var index = headerPair.indexOf(': ');
@@ -12285,104 +11418,6 @@ var DashMetrics$1 = FactoryMaker.getSingletonFactory(DashMetrics);
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
-var QUALITY_SWITCH_RULES = 'qualitySwitchRules';
-var ABANDON_FRAGMENT_RULES = 'abandonFragmentRules';
-
-function ABRRulesCollection() {
-
-    var context = this.context;
-
-    var instance = void 0,
-        qualitySwitchRules = void 0,
-        abandonFragmentRules = void 0;
-
-    function initialize() {
-        qualitySwitchRules = [];
-        abandonFragmentRules = [];
-
-        var metricsModel = MetricsModel$1(context).getInstance();
-        var dashMetrics = DashMetrics$1(context).getInstance();
-        var mediaPlayerModel = factory$4(context).getInstance();
-
-        if (mediaPlayerModel.getBufferOccupancyABREnabled()) {
-            qualitySwitchRules.push(factory$13(context).create({
-                metricsModel: metricsModel,
-                dashMetrics: DashMetrics$1(context).getInstance()
-            }));
-            abandonFragmentRules.push(BolaAbandonRule$1(context).create({
-                metricsModel: metricsModel,
-                dashMetrics: DashMetrics$1(context).getInstance()
-            }));
-        } else {
-            qualitySwitchRules.push(ThroughputRule$1(context).create({
-                metricsModel: metricsModel,
-                dashMetrics: dashMetrics
-            }));
-
-            qualitySwitchRules.push(BufferOccupancyRule$1(context).create({
-                metricsModel: metricsModel,
-                dashMetrics: dashMetrics
-            }));
-
-            qualitySwitchRules.push(InsufficientBufferRule$1(context).create({ metricsModel: metricsModel }));
-            abandonFragmentRules.push(AbandonRequestsRule$1(context).create());
-        }
-    }
-
-    function getRules(type) {
-        switch (type) {
-            case QUALITY_SWITCH_RULES:
-                return qualitySwitchRules;
-            case ABANDON_FRAGMENT_RULES:
-                return abandonFragmentRules;
-            default:
-                return null;
-        }
-    }
-
-    instance = {
-        initialize: initialize,
-        getRules: getRules
-    };
-
-    return instance;
-}
-
-ABRRulesCollection.__dashjs_factory_name = 'ABRRulesCollection';
-var factory$12 = FactoryMaker.getSingletonFactory(ABRRulesCollection);
-factory$12.QUALITY_SWITCH_RULES = QUALITY_SWITCH_RULES;
-factory$12.ABANDON_FRAGMENT_RULES = ABANDON_FRAGMENT_RULES;
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
 
 var ABANDON_LOAD = 'abandonload';
 var ALLOW_LOAD = 'allowload';
@@ -12393,16 +11428,16 @@ var QUALITY_DEFAULT = 0;
 function AbrController() {
 
     var context = this.context;
+    var debug = Debug$1(context).getInstance();
+    var log = debug.log;
     var eventBus = factory$3(context).getInstance();
 
     var instance = void 0,
         abrRulesCollection = void 0,
-        rulesController = void 0,
         streamController = void 0,
         autoSwitchBitrate = void 0,
         topQualities = void 0,
         qualityDict = void 0,
-        confidenceDict = void 0,
         bitrateDict = void 0,
         ratioDict = void 0,
         averageThroughputDict = void 0,
@@ -12418,18 +11453,24 @@ function AbrController() {
         dashManifestModel = void 0,
         videoModel = void 0,
         mediaPlayerModel = void 0,
-        domStorage = void 0;
+        domStorage = void 0,
+        playbackIndex = void 0,
+        switchHistoryDict = void 0,
+        droppedFramesHistory = void 0,
+        metricsModel = void 0,
+        dashMetrics = void 0,
+        lastSwitchTime = void 0;
 
     function setup() {
         autoSwitchBitrate = { video: true, audio: true };
         topQualities = {};
         qualityDict = {};
-        confidenceDict = {};
         bitrateDict = {};
         ratioDict = {};
         averageThroughputDict = {};
         abandonmentStateDict = {};
         streamProcessorDict = {};
+        switchHistoryDict = {};
         limitBitrateByPortal = false;
         usePixelRatioInLimitBitrateByPortal = false;
         if (windowResizeEventCalled === undefined) {
@@ -12440,16 +11481,32 @@ function AbrController() {
         manifestModel = ManifestModel$1(context).getInstance();
         dashManifestModel = DashManifestModel$1(context).getInstance();
         videoModel = VideoModel$1(context).getInstance();
+        metricsModel = MetricsModel$1(context).getInstance();
+        dashMetrics = DashMetrics$1(context).getInstance();
+        lastSwitchTime = new Date().getTime() / 1000;
     }
 
     function initialize(type, streamProcessor) {
+        switchHistoryDict[type] = factory$12(context).create();
         streamProcessorDict[type] = streamProcessor;
         abandonmentStateDict[type] = abandonmentStateDict[type] || {};
         abandonmentStateDict[type].state = ALLOW_LOAD;
         eventBus.on(events.LOADING_PROGRESS, onFragmentLoadProgress, this);
         if (type == 'video') {
+            eventBus.on(mediaPlayerEvents.QUALITY_CHANGE_RENDERED, onQualityChangeRendered, this);
+            droppedFramesHistory = factory$13(context).create();
             setElementSize();
         }
+    }
+
+    function reset() {
+        eventBus.off(events.LOADING_PROGRESS, onFragmentLoadProgress, this);
+        eventBus.off(mediaPlayerEvents.QUALITY_CHANGE_RENDERED, onQualityChangeRendered, this);
+        playbackIndex = undefined;
+        droppedFramesHistory = undefined;
+        clearTimeout(abandonmentTimeout);
+        abandonmentTimeout = null;
+        setup();
     }
 
     function setConfig(config) {
@@ -12458,11 +11515,15 @@ function AbrController() {
         if (config.abrRulesCollection) {
             abrRulesCollection = config.abrRulesCollection;
         }
-        if (config.rulesController) {
-            rulesController = config.rulesController;
-        }
         if (config.streamController) {
             streamController = config.streamController;
+        }
+    }
+
+    function onQualityChangeRendered(e) {
+        if (e.mediaType === 'video') {
+            playbackIndex = e.newQuality;
+            droppedFramesHistory.push(playbackIndex, videoModel.getPlaybackQuality());
         }
     }
 
@@ -12581,45 +11642,42 @@ function AbrController() {
         usePixelRatioInLimitBitrateByPortal = value;
     }
 
-    function getPlaybackQuality(streamProcessor, completedCallback) {
-
+    function getPlaybackQuality(streamProcessor) {
         var type = streamProcessor.getType();
         var streamInfo = streamProcessor.getStreamInfo();
         var streamId = streamInfo.id;
+        var oldQuality = getQualityFor(type, streamInfo);
+        var rulesContext = RulesContext$1(context).create({
+            streamProcessor: streamProcessor,
+            currentValue: oldQuality,
+            playbackIndex: playbackIndex,
+            switchHistory: switchHistoryDict[type],
+            droppedFramesHistory: droppedFramesHistory,
+            hasRichBuffer: hasRichBuffer(type)
+        });
 
-        var callback = function callback(res) {
+        if (droppedFramesHistory) {
+            droppedFramesHistory.push(playbackIndex, videoModel.getPlaybackQuality());
+        }
 
+        //log("ABR enabled? (" + autoSwitchBitrate + ")");
+        if (getAutoSwitchBitrateFor(type)) {
             var topQualityIdx = getTopQualityIndexFor(type, streamId);
-
-            var newQuality = res.value;
-            if (newQuality < 0) {
-                newQuality = 0;
-            }
+            var switchRequest = abrRulesCollection.getMaxQuality(rulesContext);
+            var newQuality = switchRequest.value;
             if (newQuality > topQualityIdx) {
                 newQuality = topQualityIdx;
             }
+            switchHistoryDict[type].push({ oldValue: oldQuality, newValue: newQuality });
 
-            var oldQuality = getQualityFor(type, streamInfo);
-            if (newQuality !== oldQuality && (abandonmentStateDict[type].state === ALLOW_LOAD || newQuality > oldQuality)) {
-                setConfidenceFor(type, streamId, res.confidence);
-                changeQuality(type, streamInfo, oldQuality, newQuality, res.reason);
+            if (newQuality > factory$11.NO_CHANGE && newQuality != oldQuality) {
+                if (abandonmentStateDict[type].state === ALLOW_LOAD || newQuality > oldQuality) {
+                    changeQuality(type, streamInfo, oldQuality, newQuality, topQualityIdx, switchRequest.reason);
+                }
+            } else if (debug.getLogToBrowserConsole()) {
+                var bufferLevel = dashMetrics.getCurrentBufferLevel(metricsModel.getReadOnlyMetricsFor(type));
+                log('AbrController (' + type + ') stay on ' + oldQuality + '/' + topQualityIdx + ' (buffer: ' + bufferLevel + ')');
             }
-            if (completedCallback) {
-                completedCallback();
-            }
-        };
-
-        //log("ABR enabled? (" + autoSwitchBitrate + ")");
-        if (!getAutoSwitchBitrateFor(type)) {
-            if (completedCallback) {
-                completedCallback();
-            }
-        } else {
-            var rules = abrRulesCollection.getRules(factory$12.QUALITY_SWITCH_RULES);
-            rulesController.applyRules(rules, streamProcessor, callback, getQualityFor(type, streamInfo), function (currentValue, newValue) {
-                currentValue = currentValue === factory$11.NO_CHANGE ? 0 : currentValue;
-                return Math.max(currentValue, newValue);
-            });
         }
     }
 
@@ -12630,12 +11688,17 @@ function AbrController() {
 
         if (!isInt) throw new Error('argument is not an integer');
 
-        if (newQuality !== oldQuality && newQuality >= 0 && newQuality <= getTopQualityIndexFor(type, id)) {
-            changeQuality(type, streamInfo, oldQuality, newQuality, reason);
+        var topQualityIdx = getTopQualityIndexFor(type, id);
+        if (newQuality !== oldQuality && newQuality >= 0 && newQuality <= topQualityIdx) {
+            changeQuality(type, streamInfo, oldQuality, newQuality, topQualityIdx, reason);
         }
     }
 
-    function changeQuality(type, streamInfo, oldQuality, newQuality, reason) {
+    function changeQuality(type, streamInfo, oldQuality, newQuality, topQualityIdx, reason) {
+        if (debug.getLogToBrowserConsole()) {
+            var bufferLevel = dashMetrics.getCurrentBufferLevel(metricsModel.getReadOnlyMetricsFor(type));
+            log('AbrController (' + type + ') switch from ' + oldQuality + ' to ' + newQuality + '/' + topQualityIdx + ' (buffer: ' + bufferLevel + ')\n' + JSON.stringify(reason));
+        }
         setQualityFor(type, streamInfo.id, newQuality);
         eventBus.trigger(events.QUALITY_CHANGE_REQUESTED, { mediaType: type, streamInfo: streamInfo, oldQuality: oldQuality, newQuality: newQuality, reason: reason });
     }
@@ -12651,13 +11714,23 @@ function AbrController() {
     /**
      * @param {MediaInfo} mediaInfo
      * @param {number} bitrate A bitrate value, kbps
+     * @param {number} latency Expected latency of connection, ms
      * @returns {number} A quality index <= for the given bitrate
      * @memberof AbrController#
      */
-    function getQualityForBitrate(mediaInfo, bitrate) {
+    function getQualityForBitrate(mediaInfo, bitrate, latency) {
+        if (latency && streamProcessorDict[mediaInfo.type].getCurrentRepresentationInfo() && streamProcessorDict[mediaInfo.type].getCurrentRepresentationInfo().fragmentDuration) {
+            latency = latency / 1000;
+            var fragmentDuration = streamProcessorDict[mediaInfo.type].getCurrentRepresentationInfo().fragmentDuration;
+            if (latency > fragmentDuration) {
+                return 0;
+            } else {
+                var deadTimeRatio = latency / fragmentDuration;
+                bitrate = bitrate * (1 - deadTimeRatio);
+            }
+        }
 
         var bitrateList = getBitrateList(mediaInfo);
-
         if (!bitrateList || bitrateList.length === 0) {
             return QUALITY_DEFAULT;
         }
@@ -12698,6 +11771,22 @@ function AbrController() {
         return infoList;
     }
 
+    function hasRichBuffer(type) {
+        var metrics = metricsModel.getReadOnlyMetricsFor(type);
+        var bufferLevel = dashMetrics.getCurrentBufferLevel(metrics);
+        var bufferState = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
+        var isBufferRich = false;
+
+        // This will happen when another rule tries to switch down from highest quality index
+        // If there is enough buffer why not try to stay at high level
+        if (bufferState && bufferLevel > bufferState.target) {
+            // Are we currently over the buffer target by at least RICH_BUFFER_THRESHOLD?
+            isBufferRich = bufferLevel > bufferState.target + mediaPlayerModel.getRichBufferThreshold();
+        }
+
+        return isBufferRich;
+    }
+
     function setAverageThroughput(type, value) {
         averageThroughputDict[type] = value;
     }
@@ -12727,13 +11816,6 @@ function AbrController() {
         return isAtTop;
     }
 
-    function reset() {
-        eventBus.off(events.LOADING_PROGRESS, onFragmentLoadProgress, this);
-        clearTimeout(abandonmentTimeout);
-        abandonmentTimeout = null;
-        setup();
-    }
-
     function getQualityFor(type, streamInfo) {
         var id = streamInfo.id;
         var quality;
@@ -12751,25 +11833,6 @@ function AbrController() {
     function setQualityFor(type, id, value) {
         qualityDict[id] = qualityDict[id] || {};
         qualityDict[id][type] = value;
-    }
-
-    function getConfidenceFor(type, id) {
-        var confidence;
-
-        confidenceDict[id] = confidenceDict[id] || {};
-
-        if (!confidenceDict[id].hasOwnProperty(type)) {
-            confidenceDict[id][type] = 0;
-        }
-
-        confidence = confidenceDict[id][type];
-
-        return confidence;
-    }
-
-    function setConfidenceFor(type, id, value) {
-        confidenceDict[id] = confidenceDict[id] || {};
-        confidenceDict[id][type] = value;
     }
 
     function setTopQualityIndex(type, id, value) {
@@ -12837,35 +11900,39 @@ function AbrController() {
     function onFragmentLoadProgress(e) {
         var type = e.request.mediaType;
         if (getAutoSwitchBitrateFor(type)) {
-
-            var rules = abrRulesCollection.getRules(factory$12.ABANDON_FRAGMENT_RULES);
             var scheduleController = streamProcessorDict[type].getScheduleController();
             if (!scheduleController) return; // There may be a fragment load in progress when we switch periods and recreated some controllers.
 
-            var callback = function callback(switchRequest) {
-                if (switchRequest.confidence === factory$11.STRONG && switchRequest.value < getQualityFor(type, streamController.getActiveStreamInfo())) {
-
-                    var fragmentModel = scheduleController.getFragmentModel();
-                    var request = fragmentModel.getRequests({ state: factory$2.FRAGMENT_MODEL_LOADING, index: e.request.index })[0];
-                    if (request) {
-                        //TODO Check if we should abort or if better to finish download. check bytesLoaded/Total
-                        fragmentModel.abortRequests();
-                        setAbandonmentStateFor(type, ABANDON_LOAD);
-                        setPlaybackQuality(type, streamController.getActiveStreamInfo(), switchRequest.value, switchRequest.reason);
-                        eventBus.trigger(events.FRAGMENT_LOADING_ABANDONED, { streamProcessor: streamProcessorDict[type], request: request, mediaType: type });
-
-                        clearTimeout(abandonmentTimeout);
-                        abandonmentTimeout = setTimeout(function () {
-                            setAbandonmentStateFor(type, ALLOW_LOAD);
-                            abandonmentTimeout = null;
-                        }, mediaPlayerModel.getAbandonLoadTimeout());
-                    }
-                }
-            };
-
-            rulesController.applyRules(rules, streamProcessorDict[type], callback, e, function (currentValue, newValue) {
-                return newValue;
+            var rulesContext = RulesContext$1(context).create({
+                streamProcessor: streamProcessorDict[type],
+                currentRequest: e.request,
+                currentValue: getQualityFor(type, streamController.getActiveStreamInfo()),
+                hasRichBuffer: hasRichBuffer(type)
             });
+            var switchRequest = abrRulesCollection.shouldAbandonFragment(rulesContext);
+            //Removed overrideFunc
+            //    function (currentValue, newValue) {
+            //        return newValue;
+            //    });
+
+            if (switchRequest.value > factory$11.NO_CHANGE) {
+                var fragmentModel = scheduleController.getFragmentModel();
+                var request = fragmentModel.getRequests({ state: factory$2.FRAGMENT_MODEL_LOADING, index: e.request.index })[0];
+                if (request) {
+                    //TODO Check if we should abort or if better to finish download. check bytesLoaded/Total
+                    fragmentModel.abortRequests();
+                    setAbandonmentStateFor(type, ABANDON_LOAD);
+                    switchHistoryDict[type].reset();
+                    switchHistoryDict[type].push({ oldValue: getQualityFor(type, streamController.getActiveStreamInfo()), newValue: switchRequest.value, confidence: 1, reason: switchRequest.reason });
+                    setPlaybackQuality(type, streamController.getActiveStreamInfo(), switchRequest.value, switchRequest.reason);
+                    eventBus.trigger(events.FRAGMENT_LOADING_ABANDONED, { streamProcessor: streamProcessorDict[type], request: request, mediaType: type });
+
+                    clearTimeout(abandonmentTimeout);
+                    abandonmentTimeout = setTimeout(function () {
+                        setAbandonmentStateFor(type, ALLOW_LOAD);abandonmentTimeout = null;
+                    }, mediaPlayerModel.getAbandonLoadTimeout());
+                }
+            }
         }
     }
 
@@ -12889,7 +11956,6 @@ function AbrController() {
         getLimitBitrateByPortal: getLimitBitrateByPortal,
         getUsePixelRatioInLimitBitrateByPortal: getUsePixelRatioInLimitBitrateByPortal,
         setUsePixelRatioInLimitBitrateByPortal: setUsePixelRatioInLimitBitrateByPortal,
-        getConfidenceFor: getConfidenceFor,
         getQualityFor: getQualityFor,
         getAbandonmentStateFor: getAbandonmentStateFor,
         setAbandonmentStateFor: setAbandonmentStateFor,
@@ -13604,7 +12670,8 @@ function ScheduleController(config) {
             if (isReplacement) {
                 getNextFragment();
             } else {
-                abrController.getPlaybackQuality(streamProcessor, getNextFragment);
+                abrController.getPlaybackQuality(streamProcessor);
+                getNextFragment();
             }
         } else {
             startScheduleTimer(500);
@@ -13685,6 +12752,7 @@ function ScheduleController(config) {
         currentRepresentationInfo = streamProcessor.getCurrentRepresentationInfo();
 
         if (isDynamic && initialRequest) {
+            timelineConverter.setTimeSyncCompleted(true);
             setLiveEdgeSeekTarget();
         }
 
@@ -13698,7 +12766,6 @@ function ScheduleController(config) {
         var dvrWindowSize = currentRepresentationInfo.mediaInfo.streamInfo.manifestInfo.DVRWindowSize / 2;
         var startTime = liveEdge - playbackController.computeLiveDelay(currentRepresentationInfo.fragmentDuration, dvrWindowSize);
         var request = adapter.getFragmentRequestForTime(streamProcessor, currentRepresentationInfo, startTime, { ignoreIsFinished: true });
-
         seekTarget = playbackController.getLiveStartTime();
         if (isNaN(seekTarget) || request.startTime > seekTarget) {
             playbackController.setLiveStartTime(request.startTime);
@@ -13962,52 +13029,1468 @@ var ScheduleController$1 = FactoryMaker.getClassFactory(ScheduleController);
  *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  */
+function ThroughputRule(config) {
 
-function RulesContext(config) {
+    var MAX_MEASUREMENTS_TO_KEEP = 20;
+    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE = 3;
+    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD = 4;
+    var AVERAGE_LATENCY_SAMPLES = AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD;
+    var CACHE_LOAD_THRESHOLD_VIDEO = 50;
+    var CACHE_LOAD_THRESHOLD_AUDIO = 5;
+    var CACHE_LOAD_THRESHOLD_LATENCY = 50;
+    var THROUGHPUT_DECREASE_SCALE = 1.3;
+    var THROUGHPUT_INCREASE_SCALE = 1.3;
 
-    var instance = void 0;
-    var representationInfo = config.streamProcessor.getCurrentRepresentationInfo();
-    var sp = config.streamProcessor;
-    var currentValue = config.currentValue;
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+    var dashMetrics = config.dashMetrics;
+    var metricsModel = config.metricsModel;
 
-    function getStreamInfo() {
-        return representationInfo.mediaInfo.streamInfo;
+    var throughputArray = void 0,
+        latencyArray = void 0,
+        mediaPlayerModel = void 0;
+
+    function setup() {
+        throughputArray = [];
+        latencyArray = [];
+        mediaPlayerModel = factory$4(context).getInstance();
     }
 
-    function getMediaInfo() {
-        return representationInfo.mediaInfo;
+    function storeLastRequestThroughputByType(type, throughput) {
+        throughputArray[type] = throughputArray[type] || [];
+        throughputArray[type].push(throughput);
     }
 
-    function getTrackInfo() {
-        return representationInfo;
+    function storeLatency(mediaType, latency) {
+        if (!latencyArray[mediaType]) {
+            latencyArray[mediaType] = [];
+        }
+        latencyArray[mediaType].push(latency);
+
+        if (latencyArray[mediaType].length > AVERAGE_LATENCY_SAMPLES) {
+            return latencyArray[mediaType].shift();
+        }
+
+        return undefined;
     }
 
-    function getCurrentValue() {
-        return currentValue;
+    function getAverageLatency(mediaType) {
+        var average = void 0;
+        if (latencyArray[mediaType] && latencyArray[mediaType].length > 0) {
+            average = latencyArray[mediaType].reduce(function (a, b) {
+                return a + b;
+            }) / latencyArray[mediaType].length;
+        }
+
+        return average;
     }
 
-    function getManifestInfo() {
-        return representationInfo.mediaInfo.streamInfo.manifestInfo;
+    function getSample(type, isDynamic) {
+        var size = Math.min(throughputArray[type].length, isDynamic ? AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE : AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD);
+        var sampleArray = throughputArray[type].slice(size * -1, throughputArray[type].length);
+        if (sampleArray.length > 1) {
+            sampleArray.reduce(function (a, b) {
+                if (a * THROUGHPUT_INCREASE_SCALE <= b || a >= b * THROUGHPUT_DECREASE_SCALE) {
+                    size++;
+                }
+                return b;
+            });
+        }
+        size = Math.min(throughputArray[type].length, size);
+        return throughputArray[type].slice(size * -1, throughputArray[type].length);
     }
 
-    function getStreamProcessor() {
-        return sp;
+    function getAverageThroughput(type, isDynamic) {
+        var sample = getSample(type, isDynamic);
+        var averageThroughput = 0;
+        if (sample.length > 0) {
+            var totalSampledValue = sample.reduce(function (a, b) {
+                return a + b;
+            }, 0);
+            averageThroughput = totalSampledValue / sample.length;
+        }
+        if (throughputArray[type].length >= MAX_MEASUREMENTS_TO_KEEP) {
+            throughputArray[type].shift();
+        }
+        return averageThroughput / 1000 * mediaPlayerModel.getBandwidthSafetyFactor();
+    }
+
+    function isCachedResponse(latency, downloadTime, mediaType) {
+        var ret = false;
+
+        if (latency < CACHE_LOAD_THRESHOLD_LATENCY) {
+            ret = true;
+        }
+
+        if (!ret) {
+            switch (mediaType) {
+                case 'video':
+                    ret = downloadTime < CACHE_LOAD_THRESHOLD_VIDEO;
+                    break;
+                case 'audio':
+                    ret = downloadTime < CACHE_LOAD_THRESHOLD_AUDIO;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return ret;
+    }
+
+    function getMaxIndex(rulesContext) {
+        var mediaInfo = rulesContext.getMediaInfo();
+        var mediaType = mediaInfo.type;
+        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+        var streamProcessor = rulesContext.getStreamProcessor();
+        var abrController = streamProcessor.getABRController();
+        var isDynamic = streamProcessor.isDynamic();
+        var lastRequest = dashMetrics.getCurrentHttpRequest(metrics);
+        var bufferStateVO = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
+        var hasRichBuffer = rulesContext.hasRichBuffer();
+        var switchRequest = factory$11(context).create();
+
+        if (!metrics || !lastRequest || lastRequest.type !== HTTPRequest.MEDIA_SEGMENT_TYPE || !bufferStateVO || hasRichBuffer) {
+            return switchRequest;
+        }
+
+        var downloadTimeInMilliseconds = void 0;
+        var latencyTimeInMilliseconds = void 0;
+
+        if (lastRequest.trace && lastRequest.trace.length) {
+
+            latencyTimeInMilliseconds = lastRequest.tresponse.getTime() - lastRequest.trequest.getTime() || 1;
+            downloadTimeInMilliseconds = lastRequest._tfinish.getTime() - lastRequest.tresponse.getTime() || 1; //Make sure never 0 we divide by this value. Avoid infinity!
+
+            var bytes = lastRequest.trace.reduce(function (a, b) {
+                return a + b.b[0];
+            }, 0);
+
+            var lastRequestThroughput = Math.round(bytes * 8 / (downloadTimeInMilliseconds / 1000));
+
+            var throughput = void 0;
+            var latency = void 0;
+            //Prevent cached fragment loads from skewing the average throughput value - allow first even if cached to set allowance for ABR rules..
+            if (isCachedResponse(latencyTimeInMilliseconds, downloadTimeInMilliseconds, mediaType)) {
+                if (!throughputArray[mediaType] || !latencyArray[mediaType]) {
+                    throughput = lastRequestThroughput / 1000;
+                    latency = latencyTimeInMilliseconds;
+                } else {
+                    throughput = getAverageThroughput(mediaType, isDynamic);
+                    latency = getAverageLatency(mediaType);
+                }
+            } else {
+                storeLastRequestThroughputByType(mediaType, lastRequestThroughput);
+                throughput = getAverageThroughput(mediaType, isDynamic);
+                storeLatency(mediaType, latencyTimeInMilliseconds);
+                latency = getAverageLatency(mediaType, isDynamic);
+            }
+
+            abrController.setAverageThroughput(mediaType, throughput);
+
+            if (abrController.getAbandonmentStateFor(mediaType) !== factory$10.ABANDON_LOAD) {
+
+                if (bufferStateVO.state === factory$1.BUFFER_LOADED || isDynamic) {
+                    switchRequest.value = abrController.getQualityForBitrate(mediaInfo, throughput, latency);
+                    streamProcessor.getScheduleController().setTimeToLoadDelay(0);
+                    log('ThroughputRule requesting switch to index: ', switchRequest.value, 'type: ', mediaType, 'Average throughput', Math.round(throughput), 'kbps');
+                    switchRequest.reason = { throughput: throughput, latency: latency };
+                }
+            }
+        }
+        return switchRequest;
+    }
+
+    function reset() {
+        setup();
+    }
+
+    var instance = {
+        getMaxIndex: getMaxIndex,
+        reset: reset
+    };
+
+    setup();
+    return instance;
+}
+
+ThroughputRule.__dashjs_factory_name = 'ThroughputRule';
+var ThroughputRule$1 = FactoryMaker.getClassFactory(ThroughputRule);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+function InsufficientBufferRule(config) {
+
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+    var eventBus = factory$3(context).getInstance();
+
+    var metricsModel = config.metricsModel;
+
+    var instance = void 0,
+        bufferStateDict = void 0,
+        lastSwitchTime = void 0,
+        waitToSwitchTime = void 0;
+
+    function setup() {
+        bufferStateDict = {};
+        lastSwitchTime = 0;
+        waitToSwitchTime = 1000;
+        eventBus.on(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
+    }
+
+    function getMaxIndex(rulesContext) {
+        var now = new Date().getTime();
+        var mediaType = rulesContext.getMediaInfo().type;
+        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+        var lastBufferStateVO = metrics.BufferState.length > 0 ? metrics.BufferState[metrics.BufferState.length - 1] : null;
+        var switchRequest = factory$11(context).create();
+
+        if (now - lastSwitchTime < waitToSwitchTime || lastBufferStateVO === null) {
+            return switchRequest;
+        }
+
+        setBufferInfo(mediaType, lastBufferStateVO.state);
+        // After the sessions first buffer loaded event , if we ever have a buffer empty event we want to switch all the way down.
+        if (lastBufferStateVO.state === factory$1.BUFFER_EMPTY && bufferStateDict[mediaType].firstBufferLoadedEvent !== undefined) {
+            log('Switch to index 0; buffer is empty.');
+            switchRequest.value = 0;
+            switchRequest.reason = 'InsufficientBufferRule: Buffer is empty';
+        }
+
+        lastSwitchTime = now;
+        return switchRequest;
+    }
+
+    function setBufferInfo(type, state) {
+        bufferStateDict[type] = bufferStateDict[type] || {};
+        bufferStateDict[type].state = state;
+        if (state === factory$1.BUFFER_LOADED && !bufferStateDict[type].firstBufferLoadedEvent) {
+            bufferStateDict[type].firstBufferLoadedEvent = true;
+        }
+    }
+
+    function onPlaybackSeeking() {
+        bufferStateDict = {};
+    }
+
+    function reset() {
+        eventBus.off(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
+        bufferStateDict = {};
+        lastSwitchTime = 0;
     }
 
     instance = {
-        getStreamInfo: getStreamInfo,
-        getMediaInfo: getMediaInfo,
-        getTrackInfo: getTrackInfo,
-        getCurrentValue: getCurrentValue,
-        getManifestInfo: getManifestInfo,
-        getStreamProcessor: getStreamProcessor
+        getMaxIndex: getMaxIndex,
+        reset: reset
+    };
+
+    setup();
+
+    return instance;
+}
+
+InsufficientBufferRule.__dashjs_factory_name = 'InsufficientBufferRule';
+var InsufficientBufferRule$1 = FactoryMaker.getClassFactory(InsufficientBufferRule);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+function AbandonRequestsRule() {
+
+    var ABANDON_MULTIPLIER = 1.8;
+    var GRACE_TIME_THRESHOLD = 500;
+    var MIN_LENGTH_TO_AVERAGE = 5;
+
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+
+    var fragmentDict = void 0,
+        abandonDict = void 0,
+        throughputArray = void 0,
+        mediaPlayerModel = void 0,
+        dashMetrics = void 0,
+        metricsModel = void 0;
+
+    function setup() {
+        fragmentDict = {};
+        abandonDict = {};
+        throughputArray = [];
+        mediaPlayerModel = factory$4(context).getInstance();
+        dashMetrics = DashMetrics$1(context).getInstance();
+        metricsModel = MetricsModel$1(context).getInstance();
+    }
+
+    function setFragmentRequestDict(type, id) {
+        fragmentDict[type] = fragmentDict[type] || {};
+        fragmentDict[type][id] = fragmentDict[type][id] || {};
+    }
+
+    function storeLastRequestThroughputByType(type, throughput) {
+        throughputArray[type] = throughputArray[type] || [];
+        throughputArray[type].push(throughput);
+    }
+
+    function shouldAbandon(rulesContext) {
+
+        var mediaInfo = rulesContext.getMediaInfo();
+        var mediaType = mediaInfo.type;
+        var req = rulesContext.getCurrentRequest();
+        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, { name: AbandonRequestsRule.__dashjs_factory_name });
+
+        if (!isNaN(req.index)) {
+
+            setFragmentRequestDict(mediaType, req.index);
+
+            var stableBufferTime = mediaPlayerModel.getStableBufferTime();
+            var bufferLevel = dashMetrics.getCurrentBufferLevel(metricsModel.getReadOnlyMetricsFor(mediaType));
+            if (bufferLevel > stableBufferTime) {
+                return switchRequest;
+            }
+
+            var fragmentInfo = fragmentDict[mediaType][req.index];
+            if (fragmentInfo === null || req.firstByteDate === null || abandonDict.hasOwnProperty(fragmentInfo.id)) {
+                return switchRequest;
+            }
+
+            //setup some init info based on first progress event
+            if (fragmentInfo.firstByteTime === undefined) {
+                throughputArray[mediaType] = [];
+                fragmentInfo.firstByteTime = req.firstByteDate.getTime();
+                fragmentInfo.segmentDuration = req.duration;
+                fragmentInfo.bytesTotal = req.bytesTotal;
+                fragmentInfo.id = req.index;
+            }
+            fragmentInfo.bytesLoaded = req.bytesLoaded;
+            fragmentInfo.elapsedTime = new Date().getTime() - fragmentInfo.firstByteTime;
+
+            if (fragmentInfo.bytesLoaded > 0 && fragmentInfo.elapsedTime > 0) {
+                storeLastRequestThroughputByType(mediaType, Math.round(fragmentInfo.bytesLoaded * 8 / fragmentInfo.elapsedTime));
+            }
+
+            if (throughputArray[mediaType].length >= MIN_LENGTH_TO_AVERAGE && fragmentInfo.elapsedTime > GRACE_TIME_THRESHOLD && fragmentInfo.bytesLoaded < fragmentInfo.bytesTotal) {
+
+                var totalSampledValue = throughputArray[mediaType].reduce(function (a, b) {
+                    return a + b;
+                }, 0);
+                fragmentInfo.measuredBandwidthInKbps = Math.round(totalSampledValue / throughputArray[mediaType].length);
+                fragmentInfo.estimatedTimeOfDownload = +(fragmentInfo.bytesTotal * 8 / fragmentInfo.measuredBandwidthInKbps / 1000).toFixed(2);
+                //log("id:",fragmentInfo.id, "kbps:", fragmentInfo.measuredBandwidthInKbps, "etd:",fragmentInfo.estimatedTimeOfDownload, fragmentInfo.bytesLoaded);
+
+                if (fragmentInfo.estimatedTimeOfDownload < fragmentInfo.segmentDuration * ABANDON_MULTIPLIER || rulesContext.getTrackInfo().quality === 0) {
+                    return switchRequest;
+                } else if (!abandonDict.hasOwnProperty(fragmentInfo.id)) {
+
+                    var abrController = rulesContext.getStreamProcessor().getABRController();
+                    var bytesRemaining = fragmentInfo.bytesTotal - fragmentInfo.bytesLoaded;
+                    var bitrateList = abrController.getBitrateList(mediaInfo);
+                    var newQuality = abrController.getQualityForBitrate(mediaInfo, fragmentInfo.measuredBandwidthInKbps * mediaPlayerModel.getBandwidthSafetyFactor());
+                    var estimateOtherBytesTotal = fragmentInfo.bytesTotal * bitrateList[newQuality].bitrate / bitrateList[abrController.getQualityFor(mediaType, mediaInfo.streamInfo)].bitrate;
+
+                    if (bytesRemaining > estimateOtherBytesTotal) {
+                        switchRequest.value = newQuality;
+                        switchRequest.reason.throughput = fragmentInfo.measuredBandwidthInKbps;
+                        switchRequest.reason.fragmentID = fragmentInfo.id;
+                        abandonDict[fragmentInfo.id] = fragmentInfo;
+                        log('AbandonRequestsRule ( ', mediaType, 'frag id', fragmentInfo.id, ') is asking to abandon and switch to quality to ', newQuality, ' measured bandwidth was', fragmentInfo.measuredBandwidthInKbps);
+                        delete fragmentDict[mediaType][fragmentInfo.id];
+                    }
+                }
+            } else if (fragmentInfo.bytesLoaded === fragmentInfo.bytesTotal) {
+                delete fragmentDict[mediaType][fragmentInfo.id];
+            }
+        }
+
+        return switchRequest;
+    }
+
+    function reset() {
+        setup();
+    }
+
+    var instance = {
+        shouldAbandon: shouldAbandon,
+        reset: reset
+    };
+
+    setup();
+
+    return instance;
+}
+
+AbandonRequestsRule.__dashjs_factory_name = 'AbandonRequestsRule';
+var AbandonRequestsRule$1 = FactoryMaker.getClassFactory(AbandonRequestsRule);
+
+function DroppedFramesRule() {
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+
+    var DROPPED_PERCENTAGE_FORBID = 0.15;
+    var GOOD_SAMPLE_SIZE = 375; //Don't apply the rule until this many frames have been rendered(and counted under those indices).
+
+
+    function getMaxIndex(rulesContext) {
+        var droppedFramesHistory = rulesContext.getDroppedFramesHistory();
+        if (droppedFramesHistory) {
+            var dfh = droppedFramesHistory.getFrameHistory();
+            var droppedFrames = 0;
+            var totalFrames = 0;
+            var maxIndex = factory$11.NO_CHANGE;
+            for (var i = 1; i < dfh.length; i++) {
+                //No point in measuring dropped frames for the zeroeth index.
+                if (dfh[i]) {
+                    droppedFrames = dfh[i].droppedVideoFrames;
+                    totalFrames = dfh[i].totalVideoFrames;
+
+                    if (totalFrames > GOOD_SAMPLE_SIZE && droppedFrames / totalFrames > DROPPED_PERCENTAGE_FORBID) {
+                        maxIndex = i - 1;
+                        log('DroppedFramesRule, index: ' + maxIndex + ' Dropped Frames: ' + droppedFrames + ' Total Frames: ' + totalFrames);
+                        break;
+                    }
+                }
+            }
+            return factory$11(context).create(maxIndex, { droppedFrames: droppedFrames });
+        }
+
+        return factory$11(context).create();
+    }
+
+    return {
+        getMaxIndex: getMaxIndex
+    };
+}
+
+DroppedFramesRule.__dashjs_factory_name = 'DroppedFramesRule';
+var factory$16 = FactoryMaker.getClassFactory(DroppedFramesRule);
+
+function SwitchHistoryRule() {
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+
+    //MAX_SWITCH is the number of drops made. It doesn't consider the size of the drop.
+    var MAX_SWITCH = 0.075;
+
+    //Before this number of switch requests(no switch or actual), don't apply the rule.
+    //must be < SwitchRequestHistory SWITCH_REQUEST_HISTORY_DEPTH to enable rule
+    var SAMPLE_SIZE = 6;
+
+    function getMaxIndex(rulesContext) {
+        var switchRequestHistory = rulesContext.getSwitchHistory();
+        var switchRequests = switchRequestHistory.getSwitchRequests();
+        var drops = 0;
+        var noDrops = 0;
+        var dropSize = 0;
+        var switchRequest = factory$11(context).create();
+
+        for (var i = 0; i < switchRequests.length; i++) {
+            if (switchRequests[i] !== undefined) {
+                drops += switchRequests[i].drops;
+                noDrops += switchRequests[i].noDrops;
+                dropSize += switchRequests[i].dropSize;
+
+                if (drops + noDrops >= SAMPLE_SIZE && drops / noDrops > MAX_SWITCH) {
+                    switchRequest.value = i > 0 ? i - 1 : 0;
+                    switchRequest.reason = { index: switchRequest.value, drops: drops, noDrops: noDrops, dropSize: dropSize };
+                    log('Switch history rule index: ' + switchRequest.value + ' samples: ' + (drops + noDrops) + ' drops: ' + drops);
+                    break;
+                }
+            }
+        }
+
+        return switchRequest;
+    }
+
+    return {
+        getMaxIndex: getMaxIndex
+    };
+}
+
+SwitchHistoryRule.__dashjs_factory_name = 'SwitchRequest';
+var factory$17 = FactoryMaker.getClassFactory(SwitchHistoryRule);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2016, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+
+// For a description of the BOLA adaptive bitrate (ABR) algorithm, see http://arxiv.org/abs/1601.06748
+
+// BOLA_STATE_ONE_BITRATE   : If there is only one bitrate (or initialization failed), always return NO_CHANGE.
+// BOLA_STATE_STARTUP       : Set placeholder buffer such that we download fragments at most recently measured throughput.
+// BOLA_STATE_STEADY        : Buffer primed, we switch to steady operation.
+// TODO: add BOLA_STATE_SEEK and tune Bola behavior on seeking
+var BOLA_STATE_ONE_BITRATE = 0;
+var BOLA_STATE_STARTUP = 1;
+var BOLA_STATE_STEADY = 2;
+var BOLA_DEBUG = false; // TODO: remove
+
+var MINIMUM_BUFFER_S = 10; // BOLA should never add artificial delays if buffer is less than MINIMUM_BUFFER_S.
+var BUFFER_TARGET_S = 30; // If Schedule Controller does not allow buffer level to reach BUFFER_TARGET_S, this can be a placeholder buffer level.
+var REBUFFER_SAFETY_FACTOR = 0.5; // Used when buffer level is dangerously low, might happen often in live streaming.
+
+function BolaRule(config) {
+
+    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE = 2;
+    var AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD = 3;
+
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+    var dashMetrics = config.dashMetrics;
+    var metricsModel = config.metricsModel;
+    var eventBus = factory$3(context).getInstance();
+
+    var instance = void 0,
+        lastCallTimeDict = void 0,
+        lastFragmentLoadedDict = void 0,
+        lastFragmentWasSwitchDict = void 0,
+        eventMediaTypes = void 0,
+        mediaPlayerModel = void 0,
+        playbackController = void 0,
+        adapter = void 0;
+
+    function setup() {
+        lastCallTimeDict = {};
+        lastFragmentLoadedDict = {};
+        lastFragmentWasSwitchDict = {};
+        eventMediaTypes = [];
+        mediaPlayerModel = factory$4(context).getInstance();
+        playbackController = PlaybackController$1(context).getInstance();
+        adapter = DashAdapter$1(context).getInstance();
+        eventBus.on(events.BUFFER_EMPTY, onBufferEmpty, instance);
+        eventBus.on(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
+        eventBus.on(events.PERIOD_SWITCH_STARTED, onPeriodSwitchStarted, instance);
+        eventBus.on(events.MEDIA_FRAGMENT_LOADED, onMediaFragmentLoaded, instance);
+    }
+
+    function utilitiesFromBitrates(bitrates) {
+        return bitrates.map(function (b) {
+            return Math.log(b);
+        });
+        // no need to worry about offset, any offset will be compensated for by gp
+    }
+
+    // NOTE: in live streaming, the real buffer level can drop below minimumBufferS, but bola should not stick to lowest bitrate by using a placeholder buffer level
+    function calculateParameters(minimumBufferS, bufferTargetS, bitrates, utilities) {
+        var highestUtilityIndex = NaN;
+        if (!utilities) {
+            utilities = utilitiesFromBitrates(bitrates);
+            highestUtilityIndex = utilities.length - 1;
+        } else {
+            highestUtilityIndex = 0;
+            utilities.forEach(function (u, i) {
+                if (u > utilities[highestUtilityIndex]) highestUtilityIndex = i;
+            });
+        }
+
+        if (highestUtilityIndex === 0) {
+            // if highestUtilityIndex === 0, then always use lowest bitrate
+            return null;
+        }
+
+        // TODO: Investigate if following can be better if utilities are not the default Math.log utilities.
+        // If using Math.log utilities, we can choose Vp and gp to always prefer bitrates[0] at minimumBufferS and bitrates[max] at bufferTargetS.
+        // (Vp * (utility + gp) - bufferLevel) / bitrate has the maxima described when:
+        // Vp * (utilities[0] + gp - 1) = minimumBufferS and Vp * (utilities[max] + gp - 1) = bufferTargetS
+        // giving:
+        var gp = 1 - utilities[0] + (utilities[highestUtilityIndex] - utilities[0]) / (bufferTargetS / minimumBufferS - 1);
+        var Vp = minimumBufferS / (utilities[0] + gp - 1);
+
+        return { utilities: utilities, gp: gp, Vp: Vp };
+    }
+
+    function calculateInitialState(rulesContext) {
+        var initialState = {};
+
+        var mediaInfo = rulesContext.getMediaInfo();
+
+        var streamProcessor = rulesContext.getStreamProcessor();
+        var streamInfo = rulesContext.getStreamInfo();
+        var trackInfo = rulesContext.getTrackInfo();
+
+        var isDynamic = streamProcessor.isDynamic();
+        var duration = streamInfo.manifestInfo.duration;
+        var fragmentDuration = trackInfo.fragmentDuration;
+
+        var bitrates = mediaInfo.bitrateList.map(function (b) {
+            return b.bandwidth;
+        });
+        var params = calculateParameters(MINIMUM_BUFFER_S, BUFFER_TARGET_S, bitrates, null);
+        if (params === null) {
+            // The best soloution is to always use the lowest bitrate...
+            initialState.state = BOLA_STATE_ONE_BITRATE;
+            return initialState;
+        }
+
+        initialState.state = BOLA_STATE_STARTUP;
+
+        initialState.bitrates = bitrates;
+        initialState.utilities = params.utilities;
+        initialState.Vp = params.Vp;
+        initialState.gp = params.gp;
+
+        initialState.isDynamic = isDynamic;
+        initialState.movieDuration = duration;
+        initialState.fragmentDuration = fragmentDuration;
+        initialState.bandwidthSafetyFactor = mediaPlayerModel.getBandwidthSafetyFactor();
+        initialState.rebufferSafetyFactor = REBUFFER_SAFETY_FACTOR;
+        initialState.bufferTarget = mediaPlayerModel.getStableBufferTime();
+
+        initialState.lastQuality = 0;
+        initialState.placeholderBuffer = 0;
+        initialState.throughputCount = isDynamic ? AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_LIVE : AVERAGE_THROUGHPUT_SAMPLE_AMOUNT_VOD;
+
+        if (BOLA_DEBUG) {
+            var info = '';
+            for (var i = 0; i < bitrates.length; ++i) {
+                var u = params.utilities[i];
+                var b = bitrates[i];
+                var th = 0;
+                if (i > 0) {
+                    var u1 = params.utilities[i - 1];
+                    var b1 = bitrates[i - 1];
+                    th = params.Vp * ((u1 * b - u * b1) / (b - b1) + params.gp);
+                }
+                var z = params.Vp * (u + params.gp);
+                info += '\n' + i + ':' + (0.000001 * bitrates[i]).toFixed(3) + 'Mbps ' + th.toFixed(3) + '/' + z.toFixed(3);
+            }
+            log('BolaDebug ' + mediaInfo.type + ' bitrates' + info);
+        }
+
+        return initialState;
+    }
+
+    function getQualityFromBufferLevel(bolaState, bufferLevel) {
+        var bitrateCount = bolaState.bitrates.length;
+        var quality = NaN;
+        var score = NaN;
+        for (var i = 0; i < bitrateCount; ++i) {
+            var s = (bolaState.Vp * (bolaState.utilities[i] + bolaState.gp) - bufferLevel) / bolaState.bitrates[i];
+            if (isNaN(score) || s >= score) {
+                score = s;
+                quality = i;
+            }
+        }
+        return quality;
+    }
+
+    function getLastHttpRequests(metrics, count) {
+        var allHttpRequests = dashMetrics.getHttpRequests(metrics);
+        var httpRequests = [];
+
+        for (var i = allHttpRequests.length - 1; i >= 0 && httpRequests.length < count; --i) {
+            var request = allHttpRequests[i];
+            if (request.type === HTTPRequest.MEDIA_SEGMENT_TYPE && request._tfinish && request.tresponse && request.trace) {
+                httpRequests.push(request);
+            }
+        }
+
+        return httpRequests;
+    }
+
+    function getRecentThroughput(metrics, count, mediaType) {
+        // TODO: mediaType only used for debugging, remove it
+        var lastRequests = getLastHttpRequests(metrics, count);
+        if (lastRequests.length === 0) {
+            return 0;
+        }
+
+        var totalInverse = 0;
+        var msg = '';
+        for (var i = 0; i < lastRequests.length; ++i) {
+            // The RTT delay results in a lower throughput. We can avoid this delay in the calculation, but we do not want to.
+            var downloadSeconds = 0.001 * (lastRequests[i]._tfinish.getTime() - lastRequests[i].trequest.getTime());
+            var downloadBits = 8 * lastRequests[i].trace.reduce(function (prev, cur) {
+                return prev + cur.b[0];
+            }, 0);
+            if (BOLA_DEBUG) msg += ' ' + (0.000001 * downloadBits).toFixed(3) + '/' + downloadSeconds.toFixed(3) + '=' + (0.000001 * downloadBits / downloadSeconds).toFixed(3) + 'Mbps';
+            totalInverse += downloadSeconds / downloadBits;
+        }
+
+        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule recent throughput = ' + (lastRequests.length / (1000000 * totalInverse)).toFixed(3) + 'Mbps:' + msg);
+
+        return lastRequests.length / totalInverse;
+    }
+
+    function getQualityFromThroughput(bolaState, throughput) {
+        // do not factor in bandwidthSafetyFactor here - it is factored at point of function invocation
+
+        var q = 0;
+
+        bolaState.bitrates.some(function (value, index) {
+            if (value > throughput) {
+                return true;
+            }
+            q = index;
+            return false;
+        });
+
+        return q;
+    }
+
+    function getPlaceholderIncrementInSeconds(metrics, mediaType) {
+        // find out if there was delay because of
+        // 1. lack of availability in live streaming or
+        // 2. bufferLevel > bufferTarget or
+        // 3. fast switching
+
+        var nowMs = Date.now();
+        var lctMs = lastCallTimeDict[mediaType];
+        var wasSwitch = lastFragmentWasSwitchDict[mediaType];
+        var lastRequestFinishMs = NaN;
+
+        lastCallTimeDict[mediaType] = nowMs;
+        lastFragmentWasSwitchDict[mediaType] = false;
+
+        if (!wasSwitch) {
+            var lastRequests = getLastHttpRequests(metrics, 1);
+            if (lastRequests.length > 0) {
+                lastRequestFinishMs = lastRequests[0]._tfinish.getTime();
+                if (lastRequestFinishMs > nowMs) {
+                    // this shouldn't happen, try to handle gracefully
+                    lastRequestFinishMs = nowMs;
+                }
+            }
+        }
+
+        // return the time since the finish of the last request.
+        // The return will be added cumulatively to the placeholder buffer, so we must be sure not to add the same delay twice.
+
+        var delayMs = 0;
+        if (wasSwitch || lctMs > lastRequestFinishMs) {
+            delayMs = nowMs - lctMs;
+        } else {
+            delayMs = nowMs - lastRequestFinishMs;
+        }
+
+        if (isNaN(delayMs) || delayMs <= 0) return 0;
+        return 0.001 * delayMs;
+    }
+
+    function onBufferEmpty() {
+        if (BOLA_DEBUG) log('BolaDebug BUFFER_EMPTY');
+        // if we rebuffer, we don't want the placeholder buffer to artificially raise BOLA quality
+        eventMediaTypes.forEach(function (mediaType) {
+            var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+            if (metrics.BolaState.length !== 0) {
+                var bolaState = metrics.BolaState[0]._s;
+                if (bolaState.state === BOLA_STATE_STEADY) {
+                    bolaState.placeholderBuffer = 0;
+                    metricsModel.updateBolaState(mediaType, bolaState);
+                }
+            }
+        });
+    }
+
+    function onPlaybackSeeking(e) {
+        if (BOLA_DEBUG) log('BolaDebug PLAYBACK_SEEKING ' + e.seekTime.toFixed(3));
+        // TODO: 1. Verify what happens if we seek mid-fragment.
+        // TODO: 2. If e.g. we have 10s fragments and seek, we might want to download the first fragment at a lower quality to restart playback quickly.
+        eventMediaTypes.forEach(function (mediaType) {
+            var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+            if (metrics.BolaState.length !== 0) {
+                var bolaState = metrics.BolaState[0]._s;
+                if (bolaState.state !== BOLA_STATE_ONE_BITRATE) {
+                    bolaState.state = BOLA_STATE_STARTUP;
+                }
+                metricsModel.updateBolaState(mediaType, bolaState);
+            }
+        });
+
+        lastFragmentLoadedDict = {};
+        lastFragmentWasSwitchDict = {};
+    }
+
+    function onPeriodSwitchStarted() {
+        // TODO
+    }
+
+    function onMediaFragmentLoaded(e) {
+        if (e && e.chunk && e.chunk.mediaInfo) {
+            var type = e.chunk.mediaInfo.type;
+            var start = e.chunk.start;
+            if (type !== undefined && !isNaN(start)) {
+                if (start <= lastFragmentLoadedDict[type]) {
+                    lastFragmentWasSwitchDict[type] = true;
+                    // keep lastFragmentLoadedDict[type] e.g. last fragment start 10, switch fragment 8, last is still 10
+                } else {
+                    // isNaN(lastFragmentLoadedDict[type]) also falls here
+                    lastFragmentWasSwitchDict[type] = false;
+                    lastFragmentLoadedDict[type] = start;
+                }
+            }
+        }
+    }
+
+    function getMaxIndex(rulesContext) {
+        var streamProcessor = rulesContext.getStreamProcessor();
+        streamProcessor.getScheduleController().setTimeToLoadDelay(0);
+
+        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, { name: BolaRule.__dashjs_factory_name });
+        var mediaInfo = rulesContext.getMediaInfo();
+        var mediaType = mediaInfo.type;
+        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+
+        if (metrics.BolaState.length === 0) {
+            // initialization
+
+            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + '\nBolaDebug ' + mediaType + ' BolaRule for state=- fragmentStart=' + adapter.getIndexHandlerTime(rulesContext.getStreamProcessor()).toFixed(3));
+
+            var initState = calculateInitialState(rulesContext);
+            metricsModel.updateBolaState(mediaType, initState);
+
+            var q = 0;
+            if (initState.state !== BOLA_STATE_ONE_BITRATE) {
+                // initState.state === BOLA_STATE_STARTUP
+
+                eventMediaTypes.push(mediaType);
+
+                // Bola is not invoked by dash.js to determine the bitrate quality for the first fragment. We might estimate the throughput level here, but the metric related to the HTTP request for the first fragment is usually not available.
+                // TODO: at some point, we may want to consider a tweak that redownloads the first fragment at a higher quality
+
+                var initThroughput = getRecentThroughput(metrics, initState.throughputCount, mediaType);
+                if (initThroughput === 0) {
+                    // We don't have information about any download yet - let someone else decide quality.
+                    if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality unchanged for INITIALIZE');
+                    return switchRequest;
+                }
+                q = getQualityFromThroughput(initState, initThroughput * initState.bandwidthSafetyFactor);
+                initState.lastQuality = q;
+                switchRequest.value = q;
+                switchRequest.reason.state = initState.state;
+                switchRequest.reason.throughput = initThroughput;
+            }
+
+            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + q + ' for INITIALIZE');
+            return switchRequest;
+        } // initialization
+
+        // metrics.BolaState.length > 0
+        var bolaState = metrics.BolaState[0]._s;
+        // TODO: does changing bolaState conform to coding style, or should we clone?
+
+        if (bolaState.state === BOLA_STATE_ONE_BITRATE) {
+            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality 0 for ONE_BITRATE');
+            return switchRequest;
+        }
+
+        var bitrates = bolaState.bitrates;
+        var utilities = bolaState.utilities;
+
+        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + '\nBolaDebug ' + mediaType + ' EXECUTE BolaRule for state=' + bolaState.state + ' fragmentStart=' + adapter.getIndexHandlerTime(rulesContext.getStreamProcessor()).toFixed(3));
+
+        var bufferLevel = dashMetrics.getCurrentBufferLevel(metrics) ? dashMetrics.getCurrentBufferLevel(metrics) : 0;
+        var recentThroughput = getRecentThroughput(metrics, bolaState.throughputCount, mediaType);
+
+        if (bufferLevel <= 0.1) {
+            // rebuffering occurred, reset placeholder buffer
+            bolaState.placeholderBuffer = 0;
+        }
+
+        // find out if there was delay because of lack of availability or because buffer level > bufferTarget or because of fast switching
+        var placeholderInc = getPlaceholderIncrementInSeconds(metrics, mediaType);
+        if (placeholderInc > 0) {
+            // TODO: maybe we should set some positive threshold here
+            bolaState.placeholderBuffer += placeholderInc;
+        }
+        if (bolaState.placeholderBuffer < 0) {
+            bolaState.placeholderBuffer = 0;
+        }
+
+        var effectiveBufferLevel = bufferLevel + bolaState.placeholderBuffer;
+        var bolaQuality = getQualityFromBufferLevel(bolaState, effectiveBufferLevel);
+
+        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule bufferLevel=' + bufferLevel.toFixed(3) + '(+' + bolaState.placeholderBuffer.toFixed(3) + '=' + effectiveBufferLevel.toFixed(3) + ') recentThroughput=' + (0.000001 * recentThroughput).toFixed(3) + ' tentativeQuality=' + bolaQuality);
+
+        if (bolaState.state === BOLA_STATE_STARTUP) {
+            // in startup phase, use some throughput estimation
+
+            var _q = getQualityFromThroughput(bolaState, recentThroughput * bolaState.bandwidthSafetyFactor);
+
+            if (bufferLevel > bolaState.fragmentDuration / REBUFFER_SAFETY_FACTOR) {
+                // only switch to steady state if we believe we have enough buffer to not trigger quality drop to a safeBitrate
+                bolaState.state = BOLA_STATE_STEADY;
+
+                var wantEffectiveBuffer = 0;
+                for (var i = 0; i < _q; ++i) {
+                    // We want minimum effective buffer (bufferLevel + placeholderBuffer) that gives a higher score for q when compared with any other i < q.
+                    // We want
+                    //     (Vp * (utilities[q] + gp) - bufferLevel) / bitrates[q]
+                    // to be >= any score for i < q.
+                    // We get score equality for q and i when:
+                    var b = bolaState.Vp * (bolaState.gp + (bitrates[_q] * utilities[i] - bitrates[i] * utilities[_q]) / (bitrates[_q] - bitrates[i]));
+                    if (b > wantEffectiveBuffer) {
+                        wantEffectiveBuffer = b;
+                    }
+                }
+                if (wantEffectiveBuffer > bufferLevel) {
+                    bolaState.placeholderBuffer = wantEffectiveBuffer - bufferLevel;
+                }
+            }
+
+            if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + _q + ' for STARTUP');
+            bolaState.lastQuality = _q;
+            metricsModel.updateBolaState(mediaType, bolaState);
+            switchRequest.value = _q;
+            switchRequest.reason.state = BOLA_STATE_STARTUP;
+            switchRequest.reason.throughput = recentThroughput;
+            return switchRequest;
+        }
+
+        // steady state
+
+        // we want to avoid oscillations
+        // We implement the "BOLA-O" variant: when network bandwidth lies between two encoded bitrate levels, stick to the lowest level.
+        if (bolaQuality > bolaState.lastQuality) {
+            // do not multiply throughput by bandwidthSafetyFactor here: we are not using throughput estimation but capping bitrate to avoid oscillations
+            var _q2 = getQualityFromThroughput(bolaState, recentThroughput);
+            if (bolaQuality > _q2) {
+                // only intervene if we are trying to *increase* quality to an *unsustainable* level
+
+                if (_q2 < bolaState.lastQuality) {
+                    // we are only avoid oscillations - do not drop below last quality
+                    _q2 = bolaState.lastQuality;
+                }
+                // We are dropping to an encoding bitrate which is a little less than the network bandwidth because bitrate levels are discrete. Quality q might lead to buffer inflation, so we deflate buffer to the level that q gives postive utility. This delay will be added below.
+                bolaQuality = _q2;
+            }
+        }
+
+        // Try to make sure that we can download a chunk without rebuffering. This is especially important for live streaming.
+        if (recentThroughput > 0) {
+            // We can only perform this check if we have a throughput estimate.
+            var safeBitrate = REBUFFER_SAFETY_FACTOR * recentThroughput * bufferLevel / bolaState.fragmentDuration;
+            while (bolaQuality > 0 && bitrates[bolaQuality] > safeBitrate) {
+                --bolaQuality;
+            }
+        }
+
+        // We do not want to overfill buffer with low quality chunks.
+        // Note that there will be no delay if buffer level is below MINIMUM_BUFFER_S, probably even with some margin higher than MINIMUM_BUFFER_S.
+        var delaySeconds = 0;
+        var wantBufferLevel = bolaState.Vp * (utilities[bolaQuality] + bolaState.gp);
+        delaySeconds = effectiveBufferLevel - wantBufferLevel;
+        if (delaySeconds > 0) {
+            // First reduce placeholder buffer.
+            // Note that this "delay" is the main mechanism of depleting placeholderBuffer - the real buffer is depleted by playback.
+            if (delaySeconds > bolaState.placeholderBuffer) {
+                delaySeconds -= bolaState.placeholderBuffer;
+                bolaState.placeholderBuffer = 0;
+            } else {
+                bolaState.placeholderBuffer -= delaySeconds;
+                delaySeconds = 0;
+            }
+        }
+        if (delaySeconds > 0) {
+            // After depleting all placeholder buffer, set delay.
+            if (bolaQuality === bitrates.length - 1) {
+                // At top quality, allow schedule controller to decide how far to fill buffer.
+                delaySeconds = 0;
+            } else {
+                streamProcessor.getScheduleController().setTimeToLoadDelay(1000 * delaySeconds);
+            }
+        } else {
+            delaySeconds = 0;
+        }
+
+        bolaState.lastQuality = bolaQuality;
+        metricsModel.updateBolaState(mediaType, bolaState);
+
+        switchRequest.value = bolaQuality;
+        switchRequest.reason.state = bolaState.state;
+        switchRequest.reason.throughput = recentThroughput;
+        switchRequest.reason.bufferLevel = bufferLevel;
+
+        if (BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaRule quality ' + bolaQuality + ' delay=' + delaySeconds.toFixed(3) + ' for STEADY');
+        return switchRequest;
+    }
+
+    function reset() {
+        eventBus.off(events.BUFFER_EMPTY, onBufferEmpty, instance);
+        eventBus.off(events.PLAYBACK_SEEKING, onPlaybackSeeking, instance);
+        eventBus.off(events.PERIOD_SWITCH_STARTED, onPeriodSwitchStarted, instance);
+        eventBus.off(events.MEDIA_FRAGMENT_LOADED, onMediaFragmentLoaded, instance);
+        setup();
+    }
+
+    instance = {
+        getMaxIndex: getMaxIndex,
+        reset: reset
+    };
+
+    setup();
+    return instance;
+}
+
+BolaRule.__dashjs_factory_name = 'BolaRule';
+var factory$18 = FactoryMaker.getClassFactory(BolaRule);
+factory$18.BOLA_STATE_ONE_BITRATE = BOLA_STATE_ONE_BITRATE;
+factory$18.BOLA_STATE_STARTUP = BOLA_STATE_STARTUP;
+factory$18.BOLA_STATE_STEADY = BOLA_STATE_STEADY;
+factory$18.BOLA_DEBUG = BOLA_DEBUG; // TODO: remove
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2016, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+function BolaAbandonRule(config) {
+
+    // do not abandon during the grace period
+    var GRACE_PERIOD_MS = 500;
+    var POOR_LATENCY_MS = 200;
+
+    var context = this.context;
+    var log = Debug$1(context).getInstance().log;
+    var dashMetrics = config.dashMetrics;
+    var metricsModel = config.metricsModel;
+
+    var instance = void 0,
+        abandonDict = void 0,
+        mediaPlayerModel = void 0;
+
+    function setup() {
+        abandonDict = {};
+        mediaPlayerModel = factory$4(context).getInstance();
+    }
+
+    function rememberAbandon(mediaType, index, quality) {
+        // if this is called, then canStillAbandon(mediaType, index, quality) should have returned true
+        abandonDict[mediaType] = { index: index, quality: quality };
+    }
+
+    function canAbandon(mediaType, index, quality) {
+        var a = abandonDict[mediaType];
+        if (!a) return true;
+        return index !== a.index || quality < a.quality;
+    }
+
+    function shouldAbandon(rulesContext) {
+        var mediaInfo = rulesContext.getMediaInfo();
+        var mediaType = mediaInfo.type;
+        var metrics = metricsModel.getReadOnlyMetricsFor(mediaType);
+        var request = rulesContext.getCurrentRequest();
+        var switchRequest = factory$11(context).create(factory$11.NO_CHANGE, { name: BolaAbandonRule.__dashjs_factory_name });
+
+        if (metrics.BolaState.length === 0) {
+            // should not arrive here - we shouldn't be downloading a fragment before BOLA is initialized
+            log('WARNING: executing BolaAbandonRule before initializing BolaRule');
+            abandonDict[mediaType] = null;
+            return switchRequest;
+        }
+
+        var bolaState = metrics.BolaState[0]._s;
+        // TODO: does changing bolaState conform to coding style, or should we clone?
+
+        var index = request.index;
+        var quality = request.quality;
+
+        if (isNaN(index) || quality === 0 || !canAbandon(mediaType, index, quality) || !request.firstByteDate) {
+            return switchRequest;
+        }
+
+        var nowMs = Date.now();
+        var elapsedTimeMs = nowMs - request.firstByteDate.getTime();
+
+        var bytesLoaded = request.bytesLoaded;
+        var bytesTotal = request.bytesTotal;
+        var bytesRemaining = bytesTotal - bytesLoaded;
+        var durationS = request.duration;
+
+        var bufferLevel = dashMetrics.getCurrentBufferLevel(metrics) ? dashMetrics.getCurrentBufferLevel(metrics) : 0.0;
+        var effectiveBufferLevel = bufferLevel + bolaState.placeholderBuffer;
+
+        var estimateThroughput = 8 * bytesLoaded / (0.001 * elapsedTimeMs); // throughput in bits per second
+        var estimateThroughputBSF = bolaState.bandwidthSafetyFactor * estimateThroughput;
+        var latencyS = 0.001 * (request.firstByteDate.getTime() - request.requestStartDate.getTime());
+        if (latencyS < 0.001 * POOR_LATENCY_MS) {
+            latencyS = 0.001 * POOR_LATENCY_MS;
+        }
+        var estimateTotalTimeS = latencyS + 8 * bytesTotal / estimateThroughputBSF;
+
+        var diagnosticMessage = '';
+        if (factory$18.BOLA_DEBUG) diagnosticMessage = 'index=' + index + ' quality=' + quality + ' bytesLoaded/bytesTotal=' + bytesLoaded + '/' + bytesTotal + ' bufferLevel=' + bufferLevel + ' timeSince1stByte=' + (elapsedTimeMs / 1000).toFixed(3) + ' estThroughput=' + (estimateThroughputBSF / 1000000).toFixed(3) + ' latency=' + latencyS.toFixed(3);
+
+        var estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[0] / bolaState.bitrates[quality];
+        var estimateBytesRemainingAfterLatency = bytesRemaining - latencyS * estimateThroughputBSF / 8;
+        if (estimateBytesRemainingAfterLatency < 1) {
+            estimateBytesRemainingAfterLatency = 1;
+        }
+
+        if (elapsedTimeMs < GRACE_PERIOD_MS || bytesRemaining <= estimateOtherBytesTotal || bufferLevel > bolaState.bufferTarget || estimateBytesRemainingAfterLatency <= estimateOtherBytesTotal || estimateTotalTimeS <= durationS) {
+            // Do not abandon during first GRACE_PERIOD_MS.
+            // Do not abandon if we need to download less bytes than the size of the lowest quality fragment.
+            // Do not abandon if buffer level is above bufferTarget because the schedule controller will not download anything anyway.
+            // Do not abandon if after latencyS bytesRemaining is estimated to drop below size of lowest quality fragment.
+            // Do not abandon if fragment takes less than 1 fragment duration to download.
+            return switchRequest;
+        }
+
+        // If we abandon, there will be latencyS time before we get first byte at lower quality.
+        // By that time, the no-abandon option would have downloaded some more, and the buffer level would have depleted some more.
+        // Introducing this latencyS cushion also helps avoid extra abandonment, especially with close bitrates.
+
+        var effectiveBufferAfterLatency = effectiveBufferLevel - latencyS;
+        if (effectiveBufferAfterLatency < 0) {
+            effectiveBufferAfterLatency = 0;
+        }
+
+        // if we end up abandoning, we should not consider starting a download that would require more bytes than the remaining bytes in currently downloading fragment
+        var maxDroppedQuality = 0;
+        while (maxDroppedQuality + 1 < quality && bytesTotal * bolaState.bitrates[maxDroppedQuality + 1] / bolaState.bitrates[quality] < estimateBytesRemainingAfterLatency) {
+
+            ++maxDroppedQuality;
+        }
+
+        var newQuality = quality;
+
+        if (bolaState.state === factory$18.BOLA_STATE_STARTUP) {
+            // We are not yet using the BOLA buffer rules - use different abandonment logic.
+
+            // if we are here then we failed the test that estimateTotalTimeS <= durationS, so we abandon
+
+            // search for quality that matches the throughput
+            newQuality = 0;
+            for (var i = 0; i <= maxDroppedQuality; ++i) {
+                estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[i] / bolaState.bitrates[quality];
+                if (8 * estimateOtherBytesTotal / durationS > estimateThroughputBSF) {
+                    // chunks at quality i or higher need a greater throughput
+                    break;
+                }
+                newQuality = i;
+            }
+        } else {
+            // bolaState.state === BolaRule.BOLA_STATE_STEADY
+            // check if we should abandon using BOLA utility criteria
+
+            var score = (bolaState.Vp * (bolaState.utilities[quality] + bolaState.gp) - effectiveBufferAfterLatency) / estimateBytesRemainingAfterLatency;
+
+            for (var _i = 0; _i <= maxDroppedQuality; ++_i) {
+                estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[_i] / bolaState.bitrates[quality];
+                var s = (bolaState.Vp * (bolaState.utilities[_i] + bolaState.gp) - effectiveBufferAfterLatency) / estimateOtherBytesTotal;
+                if (s > score) {
+                    newQuality = _i;
+                    score = s;
+                }
+            }
+        }
+
+        // Perform check for rebuffer avoidance - now use real buffer level as opposed to effective buffer level.
+        var safeByteSize = bolaState.rebufferSafetyFactor * estimateThroughput * (bufferLevel - latencyS) / 8;
+
+        if (newQuality === quality && estimateBytesRemainingAfterLatency > safeByteSize) {
+            newQuality = maxDroppedQuality;
+        }
+
+        if (newQuality === quality) {
+            // no change
+            return switchRequest;
+        }
+
+        // newQuality < quality, we are abandoning
+        while (newQuality > 0) {
+            estimateOtherBytesTotal = bytesTotal * bolaState.bitrates[newQuality] / bolaState.bitrates[quality];
+            if (estimateOtherBytesTotal <= safeByteSize) {
+                break;
+            }
+            --newQuality;
+        }
+
+        // deflate placeholder buffer - we want to be conservative after abandoning
+        var wantBufferLevel = NaN;
+        if (newQuality > 0) {
+            // deflate to point where score for newQuality is just getting better than for (newQuality - 1)
+            var u = bolaState.utilities[newQuality];
+            var u1 = bolaState.utilities[newQuality - 1];
+            var _s = bolaState.bitrates[newQuality];
+            var s1 = bolaState.bitrates[newQuality - 1];
+            wantBufferLevel = bolaState.Vp * ((_s * u1 - s1 * u) / (_s - s1) + bolaState.gp);
+        } else {
+            // deflate to point where score for (newQuality + 1) is just getting better than for newQuality
+            var _u = bolaState.utilities[0];
+            var _u2 = bolaState.utilities[1];
+            var _s2 = bolaState.bitrates[0];
+            var _s3 = bolaState.bitrates[1];
+            wantBufferLevel = bolaState.Vp * ((_s2 * _u2 - _s3 * _u) / (_s2 - _s3) + bolaState.gp);
+            // then reduce one fragment duration to be conservative
+            wantBufferLevel -= durationS;
+        }
+        if (effectiveBufferLevel > wantBufferLevel) {
+            bolaState.placeholderBuffer = wantBufferLevel - bufferLevel;
+            if (bolaState.placeholderBuffer < 0) bolaState.placeholderBuffer = 0;
+        }
+
+        bolaState.lastQuality = newQuality;
+        metricsModel.updateBolaState(mediaType, bolaState);
+
+        if (factory$18.BOLA_DEBUG) log('BolaDebug ' + mediaType + ' BolaAbandonRule abandon to ' + newQuality + ' - ' + diagnosticMessage);
+
+        rememberAbandon(mediaType, index, quality);
+        switchRequest.value = newQuality;
+        switchRequest.reason.state = bolaState.state;
+        switchRequest.reason.throughput = estimateThroughput;
+        switchRequest.reason.bufferLevel = bufferLevel;
+        // following entries used for tuning algorithm
+        switchRequest.reason.bytesLoaded = request.bytesLoaded;
+        switchRequest.reason.bytesTotal = request.bytesTotal;
+        switchRequest.reason.elapsedTimeMs = elapsedTimeMs;
+
+        return switchRequest;
+    }
+
+    function reset() {
+        abandonDict = {};
+    }
+
+    instance = {
+        shouldAbandon: shouldAbandon,
+        reset: reset
+    };
+
+    setup();
+
+    return instance;
+}
+
+BolaAbandonRule.__dashjs_factory_name = 'BolaAbandonRule';
+var BolaAbandonRule$1 = FactoryMaker.getClassFactory(BolaAbandonRule);
+
+/**
+ * The copyright in this software is being made available under the BSD License,
+ * included below. This software may be subject to other third party and contributor
+ * rights, including patent rights, and no such rights are granted under this license.
+ *
+ * Copyright (c) 2013, Dash Industry Forum.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ *  * Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *  * Neither the name of Dash Industry Forum nor the names of its
+ *  contributors may be used to endorse or promote products derived from this software
+ *  without specific prior written permission.
+ *
+ *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
+ *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+ *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ *  POSSIBILITY OF SUCH DAMAGE.
+ */
+var QUALITY_SWITCH_RULES = 'qualitySwitchRules';
+var ABANDON_FRAGMENT_RULES = 'abandonFragmentRules';
+
+function ABRRulesCollection() {
+
+    var context = this.context;
+
+    var instance = void 0,
+        qualitySwitchRules = void 0,
+        abandonFragmentRules = void 0;
+
+    function initialize() {
+        qualitySwitchRules = [];
+        abandonFragmentRules = [];
+
+        var metricsModel = MetricsModel$1(context).getInstance();
+        var dashMetrics = DashMetrics$1(context).getInstance();
+        var mediaPlayerModel = factory$4(context).getInstance();
+
+        if (mediaPlayerModel.getBufferOccupancyABREnabled()) {
+            qualitySwitchRules.push(factory$18(context).create({
+                metricsModel: metricsModel,
+                dashMetrics: DashMetrics$1(context).getInstance()
+            }));
+            abandonFragmentRules.push(BolaAbandonRule$1(context).create({
+                metricsModel: metricsModel,
+                dashMetrics: DashMetrics$1(context).getInstance()
+            }));
+        } else {
+            qualitySwitchRules.push(ThroughputRule$1(context).create({
+                metricsModel: metricsModel,
+                dashMetrics: dashMetrics
+            }));
+
+            qualitySwitchRules.push(InsufficientBufferRule$1(context).create({ metricsModel: metricsModel }));
+            qualitySwitchRules.push(factory$17(context).create());
+            qualitySwitchRules.push(factory$16(context).create());
+            abandonFragmentRules.push(AbandonRequestsRule$1(context).create());
+        }
+    }
+
+    function getRules(type) {
+        switch (type) {
+            case QUALITY_SWITCH_RULES:
+                return qualitySwitchRules;
+            case ABANDON_FRAGMENT_RULES:
+                return abandonFragmentRules;
+            default:
+                return null;
+        }
+    }
+
+    function getActiveRules(srArray) {
+        return srArray.filter(function (sr) {
+            return sr.value > factory$11.NO_CHANGE;
+        });
+    }
+
+    function getMinSwitchRequest(srArray) {
+        if (srArray.length === 0) {
+            return;
+        }
+        return srArray.reduce(function (a, b) {
+            return a.value < b.value ? a : b;
+        });
+    }
+
+    function getMaxQuality(rulesContext) {
+        var switchRequestArray = qualitySwitchRules.map(function (rule) {
+            return rule.getMaxIndex(rulesContext);
+        });
+        var activeRules = getActiveRules(switchRequestArray);
+        var maxQuality = getMinSwitchRequest(activeRules);
+
+        return maxQuality || factory$11(context).create();
+    }
+
+    function shouldAbandonFragment(rulesContext) {
+        var abandonRequestArray = abandonFragmentRules.map(function (rule) {
+            return rule.shouldAbandon(rulesContext);
+        });
+        var activeRules = getActiveRules(abandonRequestArray);
+        var shouldAbandon = getMinSwitchRequest(activeRules);
+
+        return shouldAbandon || factory$11(context).create();
+    }
+
+    instance = {
+        initialize: initialize,
+        getRules: getRules,
+        getMaxQuality: getMaxQuality,
+        shouldAbandonFragment: shouldAbandonFragment
     };
 
     return instance;
 }
 
-RulesContext.__dashjs_factory_name = 'RulesContext';
-var RulesContext$1 = FactoryMaker.getClassFactory(RulesContext);
+ABRRulesCollection.__dashjs_factory_name = 'ABRRulesCollection';
+var factory$15 = FactoryMaker.getSingletonFactory(ABRRulesCollection);
+factory$15.QUALITY_SWITCH_RULES = QUALITY_SWITCH_RULES;
+factory$15.ABANDON_FRAGMENT_RULES = ABANDON_FRAGMENT_RULES;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -14060,7 +14543,7 @@ function RulesController() {
         }
     }
 
-    function applyRules(rulesArr, streamProcessor, callback, current, overrideFunc) {
+    function applyRules(rulesArr, streamProcessor, callback, current, playbackQuality, overrideFunc) {
         var values = {};
         var reasons = {};
         var rule, i;
@@ -14124,7 +14607,7 @@ function RulesController() {
 
     function reset() {
         var abrRules = rules[ABR_RULE];
-        var allRules = (abrRules.getRules(factory$12.QUALITY_SWITCH_RULES) || []).concat(abrRules.getRules(factory$12.ABANDON_FRAGMENT_RULES) || []);
+        var allRules = (abrRules.getRules(factory$15.QUALITY_SWITCH_RULES) || []).concat(abrRules.getRules(factory$15.ABANDON_FRAGMENT_RULES) || []);
         var ln = allRules.length;
 
         var rule, i;
@@ -14421,7 +14904,7 @@ function XHRLoader(cfg) {
 
 XHRLoader.__dashjs_factory_name = 'XHRLoader';
 
-var factory$16 = FactoryMaker.getClassFactory(XHRLoader);
+var factory$20 = FactoryMaker.getClassFactory(XHRLoader);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -14558,7 +15041,7 @@ function FragmentLoader(config) {
         xhrLoader = void 0;
 
     function setup() {
-        xhrLoader = factory$16(context).create({
+        xhrLoader = factory$20(context).create({
             errHandler: config.errHandler,
             metricsModel: config.metricsModel,
             requestModifier: config.requestModifier
@@ -14647,9 +15130,9 @@ function FragmentLoader(config) {
 
 FragmentLoader.__dashjs_factory_name = 'FragmentLoader';
 
-var factory$15 = FactoryMaker.getClassFactory(FragmentLoader);
-factory$15.FRAGMENT_LOADER_ERROR_LOADING_FAILURE = FRAGMENT_LOADER_ERROR_LOADING_FAILURE;
-factory$15.FRAGMENT_LOADER_ERROR_NULL_REQUEST = FRAGMENT_LOADER_ERROR_NULL_REQUEST;
+var factory$19 = FactoryMaker.getClassFactory(FragmentLoader);
+factory$19.FRAGMENT_LOADER_ERROR_LOADING_FAILURE = FRAGMENT_LOADER_ERROR_LOADING_FAILURE;
+factory$19.FRAGMENT_LOADER_ERROR_NULL_REQUEST = FRAGMENT_LOADER_ERROR_NULL_REQUEST;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -14704,253 +15187,6 @@ function RequestModifier() {
 
 RequestModifier.__dashjs_factory_name = 'RequestModifier';
 var RequestModifier$1 = FactoryMaker.getSingletonFactory(RequestModifier);
-
-/**
- * The copyright in this software is being made available under the BSD License,
- * included below. This software may be subject to other third party and contributor
- * rights, including patent rights, and no such rights are granted under this license.
- *
- * Copyright (c) 2013, Dash Industry Forum.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *  * Redistributions of source code must retain the above copyright notice, this
- *  list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation and/or
- *  other materials provided with the distribution.
- *  * Neither the name of Dash Industry Forum nor the names of its
- *  contributors may be used to endorse or promote products derived from this software
- *  without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND ANY
- *  EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- *  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
- *  INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- *  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- *  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
- */
-/**
- * @class
- *
- */
-
-var MediaPlayerEvents = function (_EventsBase) {
-  inherits(MediaPlayerEvents, _EventsBase);
-
-  /**
-   * @description Public facing external events to be used when developing a player that implements dash.js.
-   */
-  function MediaPlayerEvents() {
-    classCallCheck(this, MediaPlayerEvents);
-
-    /**
-     * Triggered when playback will not start yet
-     * as the MPD's availabilityStartTime is in the future.
-     * Check delay property in payload to determine time before playback will start.
-     */
-    var _this = possibleConstructorReturn(this, (MediaPlayerEvents.__proto__ || Object.getPrototypeOf(MediaPlayerEvents)).call(this));
-
-    _this.AST_IN_FUTURE = 'astInFuture';
-    /**
-     * Triggered when the video element's buffer state changes to stalled.
-     * Check mediaType in payload to determine type (Video, Audio, FragmentedText).
-     * @event MediaPlayerEvents#BUFFER_EMPTY
-     */
-    _this.BUFFER_EMPTY = 'bufferStalled';
-    /**
-     * Triggered when the video element's buffer state changes to loaded.
-     * Check mediaType in payload to determine type (Video, Audio, FragmentedText).
-     * @event MediaPlayerEvents#BUFFER_LOADED
-     */
-    _this.BUFFER_LOADED = 'bufferLoaded';
-
-    /**
-     * Triggered when the video element's buffer state changes, either stalled or loaded. Check payload for state.
-     * @event MediaPlayerEvents#BUFFER_LEVEL_STATE_CHANGED
-     */
-    _this.BUFFER_LEVEL_STATE_CHANGED = 'bufferStateChanged';
-
-    /**
-    * Triggered when there is an error from the element or MSE source buffer.
-    * @event MediaPlayerEvents#ERROR
-    */
-    _this.ERROR = 'error';
-
-    /**
-    * Triggered when a fragment download has completed.
-    * @event MediaPlayerEvents#FRAGMENT_LOADING_COMPLETED
-    */
-    _this.FRAGMENT_LOADING_COMPLETED = 'fragmentLoadingCompleted';
-    /**
-    * Triggered when a fragment download has started.
-    * @event MediaPlayerEvents#FRAGMENT_LOADING_STARTED
-    */
-    _this.FRAGMENT_LOADING_STARTED = 'fragmentLoadingStarted';
-    /**
-    * Triggered when a fragment download is abandoned due to detection of slow download base on the ABR abandon rule..
-    * @event MediaPlayerEvents#FRAGMENT_LOADING_ABANDONED
-    */
-    _this.FRAGMENT_LOADING_ABANDONED = 'fragmentLoadingAbandoned';
-    /**
-     * Triggered when {@link module:Debug} log method is called.
-     * @event MediaPlayerEvents#LOG
-     */
-    _this.LOG = 'log';
-    //TODO refactor with internal event
-    /**
-     * Triggered when the manifest load is complete
-     * @event MediaPlayerEvents#MANIFEST_LOADED
-     */
-    _this.MANIFEST_LOADED = 'manifestLoaded';
-    /**
-     * Triggered anytime there is a change to the overall metrics.
-     * @event MediaPlayerEvents#METRICS_CHANGED
-     */
-    _this.METRICS_CHANGED = 'metricsChanged';
-    /**
-     * Triggered when an individual metric is added, updated or cleared.
-     * @event MediaPlayerEvents#METRIC_CHANGED
-     */
-    _this.METRIC_CHANGED = 'metricChanged';
-    /**
-     * Triggered every time a new metric is added.
-     * @event MediaPlayerEvents#METRIC_ADDED
-     */
-    _this.METRIC_ADDED = 'metricAdded';
-    /**
-     * Triggered every time a metric is updated.
-     * @event MediaPlayerEvents#METRIC_UPDATED
-     */
-    _this.METRIC_UPDATED = 'metricUpdated';
-    /**
-     * Triggered at the stream end of a period.
-     * @event MediaPlayerEvents#PERIOD_SWITCH_COMPLETED
-     */
-    _this.PERIOD_SWITCH_COMPLETED = 'periodSwitchCompleted';
-    /**
-     * Triggered when a new period starts.
-     * @event MediaPlayerEvents#PERIOD_SWITCH_STARTED
-     */
-    _this.PERIOD_SWITCH_STARTED = 'periodSwitchStarted';
-
-    /**
-     * Triggered when an ABR up /down switch is initialed; either by user in manual mode or auto mode via ABR rules.
-     * @event MediaPlayerEvents#QUALITY_CHANGE_REQUESTED
-     */
-    _this.QUALITY_CHANGE_REQUESTED = 'qualityChangeRequested';
-
-    /**
-     * Triggered when the new ABR quality is being rendered on-screen.
-     * @event MediaPlayerEvents#QUALITY_CHANGE_RENDERED
-     */
-    _this.QUALITY_CHANGE_RENDERED = 'qualityChangeRendered';
-
-    /**
-     * Triggered when the stream is setup and ready.
-     * @event MediaPlayerEvents#STREAM_INITIALIZED
-     */
-    _this.STREAM_INITIALIZED = 'streamInitialized';
-    /**
-     * Triggered once all text tracks detected in the MPD are added to the video element.
-     * @event MediaPlayerEvents#TEXT_TRACKS_ADDED
-     */
-    _this.TEXT_TRACKS_ADDED = 'allTextTracksAdded';
-    /**
-     * Triggered when a text track is added to the video element's TextTrackList
-     * @event MediaPlayerEvents#TEXT_TRACK_ADDED
-     */
-    _this.TEXT_TRACK_ADDED = 'textTrackAdded';
-
-    /**
-     * Sent when enough data is available that the media can be played,
-     * at least for a couple of frames.  This corresponds to the
-     * HAVE_ENOUGH_DATA readyState.
-     * @event MediaPlayerEvents#CAN_PLAY
-     */
-    _this.CAN_PLAY = 'canPlay';
-
-    /**
-     * Sent when playback completes.
-     * @event MediaPlayerEvents#PLAYBACK_ENDED
-     */
-    _this.PLAYBACK_ENDED = 'playbackEnded';
-
-    /**
-     * Sent when an error occurs.  The element's error
-     * attribute contains more information.
-     * @event MediaPlayerEvents#PLAYBACK_ERROR
-     */
-    _this.PLAYBACK_ERROR = 'playbackError';
-    /**
-     * Sent when playback is not allowed (for example if user gesture is needed).
-     * @event MediaPlayerEvents#PLAYBACK_NOT_ALLOWED
-     */
-    _this.PLAYBACK_NOT_ALLOWED = 'playbackNotAllowed';
-    /**
-     * The media's metadata has finished loading; all attributes now
-     * contain as much useful information as they're going to.
-     * @event MediaPlayerEvents#PLAYBACK_METADATA_LOADED
-     */
-    _this.PLAYBACK_METADATA_LOADED = 'playbackMetaDataLoaded';
-    /**
-     * Sent when playback is paused.
-     * @event MediaPlayerEvents#PLAYBACK_PAUSED
-     */
-    _this.PLAYBACK_PAUSED = 'playbackPaused';
-    /**
-     * Sent when the media begins to play (either for the first time, after having been paused,
-     * or after ending and then restarting).
-     *
-     * @event MediaPlayerEvents#PLAYBACK_PLAYING
-     */
-    _this.PLAYBACK_PLAYING = 'playbackPlaying';
-    /**
-     * Sent periodically to inform interested parties of progress downloading
-     * the media. Information about the current amount of the media that has
-     * been downloaded is available in the media element's buffered attribute.
-     * @event MediaPlayerEvents#PLAYBACK_PROGRESS
-     */
-    _this.PLAYBACK_PROGRESS = 'playbackProgress';
-    /**
-     * Sent when the playback speed changes.
-     * @event MediaPlayerEvents#PLAYBACK_RATE_CHANGED
-     */
-    _this.PLAYBACK_RATE_CHANGED = 'playbackRateChanged';
-    /**
-     * Sent when a seek operation completes.
-     * @event MediaPlayerEvents#PLAYBACK_SEEKED
-     */
-    _this.PLAYBACK_SEEKED = 'playbackSeeked';
-    /**
-     * Sent when a seek operation begins.
-     * @event MediaPlayerEvents#PLAYBACK_SEEKING
-     */
-    _this.PLAYBACK_SEEKING = 'playbackSeeking';
-    /**
-     * Sent when playback of the media starts after having been paused;
-     * that is, when playback is resumed after a prior pause event.
-     *
-     * @event MediaPlayerEvents#PLAYBACK_STARTED
-     */
-    _this.PLAYBACK_STARTED = 'playbackStarted';
-    /**
-     * The time indicated by the element's currentTime attribute has changed.
-     * @event MediaPlayerEvents#PLAYBACK_TIME_UPDATED
-     */
-    _this.PLAYBACK_TIME_UPDATED = 'playbackTimeUpdated';
-    return _this;
-  }
-
-  return MediaPlayerEvents;
-}(EventsBase);
-
-var mediaPlayerEvents = new MediaPlayerEvents();
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -15148,7 +15384,7 @@ function RepresentationController() {
     function isAllRepresentationsUpdated() {
         for (var i = 0, ln = availableRepresentations.length; i < ln; i++) {
             var segmentInfoType = availableRepresentations[i].segmentInfoType;
-            if (availableRepresentations[i].segmentAvailabilityRange === null || availableRepresentations[i].initialization === null || (segmentInfoType === 'SegmentBase' || segmentInfoType === 'BaseURL') && !availableRepresentations[i].segments) {
+            if (availableRepresentations[i].segmentAvailabilityRange === null || !Representation.hasInitialization(availableRepresentations[i]) || (segmentInfoType === 'SegmentBase' || segmentInfoType === 'BaseURL') && !availableRepresentations[i].segments) {
                 return false;
             }
         }
@@ -15389,7 +15625,7 @@ function StreamProcessor(config) {
         bufferController.initialize(type, mediaSource, this);
         scheduleController.initialize(type, this);
 
-        fragmentLoader = factory$15(context).create({
+        fragmentLoader = factory$19(context).create({
             metricsModel: MetricsModel$1(context).getInstance(),
             errHandler: factory$8(context).getInstance(),
             requestModifier: RequestModifier$1(context).getInstance()
@@ -16099,6 +16335,10 @@ function replaceTokenForTemplate(url, token, value) {
     var tokenLen = token.length;
     var formatTagLen = formatTag.length;
 
+    if (!url) {
+        return url;
+    }
+
     // keep looping round until all instances of <token> have been
     // replaced. once that has happened, startPos below will be -1
     // and the completed url will be returned.
@@ -16500,7 +16740,7 @@ function TimelineSegmentsGetter(config, isDynamic) {
 }
 
 TimelineSegmentsGetter.__dashjs_factory_name = 'TimelineSegmentsGetter';
-var factory$19 = FactoryMaker.getClassFactory(TimelineSegmentsGetter);
+var factory$23 = FactoryMaker.getClassFactory(TimelineSegmentsGetter);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -16591,7 +16831,7 @@ function TemplateSegmentsGetter(config, isDynamic) {
 }
 
 TemplateSegmentsGetter.__dashjs_factory_name = 'TemplateSegmentsGetter';
-var factory$20 = FactoryMaker.getClassFactory(TemplateSegmentsGetter);
+var factory$24 = FactoryMaker.getClassFactory(TemplateSegmentsGetter);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -16671,7 +16911,7 @@ function ListSegmentsGetter(config, isDynamic) {
 }
 
 ListSegmentsGetter.__dashjs_factory_name = 'ListSegmentsGetter';
-var factory$21 = FactoryMaker.getClassFactory(ListSegmentsGetter);
+var factory$25 = FactoryMaker.getClassFactory(ListSegmentsGetter);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -16714,9 +16954,9 @@ function SegmentsGetter(config, isDynamic) {
         listSegmentsGetter = void 0;
 
     function setup() {
-        timelineSegmentsGetter = factory$19(context).create(config, isDynamic);
-        templateSegmentsGetter = factory$20(context).create(config, isDynamic);
-        listSegmentsGetter = factory$21(context).create(config, isDynamic);
+        timelineSegmentsGetter = factory$23(context).create(config, isDynamic);
+        templateSegmentsGetter = factory$24(context).create(config, isDynamic);
+        listSegmentsGetter = factory$25(context).create(config, isDynamic);
     }
 
     function getSegments(representation, requestedTime, index, onSegmentListUpdatedCallback, availabilityUpperLimit) {
@@ -16770,7 +17010,7 @@ function SegmentsGetter(config, isDynamic) {
 }
 
 SegmentsGetter.__dashjs_factory_name = 'SegmentsGetter';
-var factory$18 = FactoryMaker.getClassFactory(SegmentsGetter);
+var factory$22 = FactoryMaker.getClassFactory(SegmentsGetter);
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -16840,7 +17080,7 @@ function DashHandler(config) {
         type = streamProcessor.getType();
         isDynamic = streamProcessor.isDynamic();
 
-        segmentsGetter = factory$18(context).create(config, isDynamic);
+        segmentsGetter = factory$22(context).create(config, isDynamic);
     }
 
     function getStreamProcessor() {
@@ -16877,11 +17117,11 @@ function DashHandler(config) {
     }
 
     function unescapeDollarsInTemplate(url) {
-        return url.split('$$').join('$');
+        return url ? url.split('$$').join('$') : url;
     }
 
     function replaceIDForTemplate(url, value) {
-        if (value === null || url.indexOf('$RepresentationID$') === -1) {
+        if (value === null || url === null || url.indexOf('$RepresentationID$') === -1) {
             return url;
         }
         var v = value.toString();
@@ -16994,8 +17234,8 @@ function DashHandler(config) {
     }
 
     function updateRepresentation(representation, keepIdx) {
-        var hasInitialization = representation.initialization;
-        var hasSegments = representation.segmentInfoType !== 'BaseURL' && representation.segmentInfoType !== 'SegmentBase' && !representation.indexRange;
+        var hasInitialization = Representation.hasInitialization(representation);
+        var hasSegments = Representation.hasSegments(representation);
         var error;
 
         if (!representation.segmentDuration && !representation.segments) {
@@ -17107,10 +17347,11 @@ function DashHandler(config) {
             log('Getting the request for ' + type + ' time : ' + time);
         }
 
-        index = getIndexForSegments(time, representation, timeThreshold);
-        //Index may be -1 if getSegments needs to update.  So after getSegments is called and updated then try to get index again.
         updateSegments(representation);
+        index = getIndexForSegments(time, representation, timeThreshold);
+        //Index may be -1 if getSegments needs to update again.  So after getSegments is called and updated then try to get index again.
         if (index < 0) {
+            updateSegments(representation);
             index = getIndexForSegments(time, representation, timeThreshold);
         }
 
@@ -17217,7 +17458,7 @@ function DashHandler(config) {
 
         onSegmentListUpdated(representation, segments);
 
-        if (!representation.initialization) return;
+        if (!Representation.hasInitialization(representation)) return;
 
         eventBus.trigger(events.REPRESENTATION_UPDATED, { sender: this, representation: representation });
     }
@@ -17243,8 +17484,8 @@ function DashHandler(config) {
 }
 
 DashHandler.__dashjs_factory_name = 'DashHandler';
-var factory$17 = FactoryMaker.getClassFactory(DashHandler);
-factory$17.SEGMENTS_UNAVAILABLE_ERROR_CODE = SEGMENTS_UNAVAILABLE_ERROR_CODE;
+var factory$21 = FactoryMaker.getClassFactory(DashHandler);
+factory$21.SEGMENTS_UNAVAILABLE_ERROR_CODE = SEGMENTS_UNAVAILABLE_ERROR_CODE;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -17286,27 +17527,37 @@ function SegmentBaseLoader() {
         errHandler = void 0,
         boxParser = void 0,
         requestModifier = void 0,
+        metricsModel = void 0,
+        xhrLoader = void 0,
         baseURLController = void 0;
 
     function initialize() {
         errHandler = factory$8(context).getInstance();
         boxParser = BoxParser$1(context).getInstance();
         requestModifier = RequestModifier$1(context).getInstance();
+        xhrLoader = factory$20(context).create({
+            errHandler: errHandler,
+            metricsModel: metricsModel,
+            requestModifier: requestModifier
+        });
     }
 
     function setConfig(config) {
         if (config.baseURLController) {
             baseURLController = config.baseURLController;
         }
+
+        if (config.metricsModel) {
+            metricsModel = config.metricsModel;
+        }
     }
 
     function loadInitialization(representation, loadingInfo) {
-        var needFailureReport = true;
         var initRange = null;
         var isoFile = null;
-        var request = new XMLHttpRequest();
         var baseUrl = baseURLController.resolve(representation.path);
         var info = loadingInfo || {
+            init: true,
             url: baseUrl ? baseUrl.url : undefined,
             range: {
                 start: 0,
@@ -17314,24 +17565,23 @@ function SegmentBaseLoader() {
             },
             searching: false,
             bytesLoaded: 0,
-            bytesToLoad: 1500,
-            request: request
+            bytesToLoad: 1500
         };
 
         log('Start searching for initialization.');
 
-        request.onload = function () {
-            if (request.status < 200 || request.status > 299) return;
+        var request = getFragmentRequest(info);
 
-            needFailureReport = false;
+        var onload = function onload(response) {
 
             info.bytesLoaded = info.range.end;
-            isoFile = boxParser.parse(request.response);
+            isoFile = boxParser.parse(response);
             initRange = findInitRange(isoFile);
 
             if (initRange) {
                 representation.range = initRange;
-                representation.initialization = info.url;
+                // note that we don't explicitly set rep.initialization as this
+                // will be computed when all BaseURLs are resolved later
                 eventBus.trigger(events.INITIALIZATION_LOADED, { representation: representation });
             } else {
                 info.range.end = info.bytesLoaded + info.bytesToLoad;
@@ -17339,15 +17589,12 @@ function SegmentBaseLoader() {
             }
         };
 
-        request.onloadend = request.onerror = function () {
-            if (!needFailureReport) return;
-            needFailureReport = false;
-
-            errHandler.downloadError('initialization', info.url, request);
+        var onerror = function onerror() {
             eventBus.trigger(events.INITIALIZATION_LOADED, { representation: representation });
         };
 
-        sendRequest(request, info);
+        xhrLoader.load({ request: request, success: onload, error: onerror });
+
         log('Perform init search: ' + info.url);
     }
 
@@ -17358,30 +17605,27 @@ function SegmentBaseLoader() {
         }
 
         callback = !callback ? onLoaded : callback;
-        var needFailureReport = true;
         var isoFile = null;
         var sidx = null;
         var hasRange = !!range;
-        var request = new XMLHttpRequest();
         var baseUrl = baseURLController.resolve(representation.path);
         var info = {
+            init: false,
             url: baseUrl ? baseUrl.url : undefined,
             range: hasRange ? range : { start: 0, end: 1500 },
             searching: !hasRange,
             bytesLoaded: loadingInfo ? loadingInfo.bytesLoaded : 0,
-            bytesToLoad: 1500,
-            request: request
+            bytesToLoad: 1500
         };
 
-        request.onload = function () {
-            if (request.status < 200 || request.status > 299) return;
+        var request = getFragmentRequest(info);
 
+        var onload = function onload(response) {
             var extraBytes = info.bytesToLoad;
-            var loadedLength = request.response.byteLength;
+            var loadedLength = response.byteLength;
 
-            needFailureReport = false;
             info.bytesLoaded = info.range.end - info.range.start;
-            isoFile = boxParser.parse(request.response);
+            isoFile = boxParser.parse(response);
             sidx = isoFile.getBox('sidx');
 
             if (!sidx || !sidx.isComplete) {
@@ -17447,23 +17691,20 @@ function SegmentBaseLoader() {
             }
         };
 
-        request.onloadend = request.onerror = function () {
-            if (!needFailureReport) return;
-
-            needFailureReport = false;
-            errHandler.downloadError('SIDX', info.url, request);
+        var onerror = function onerror() {
             callback(null, representation, type);
         };
 
-        sendRequest(request, info);
+        xhrLoader.load({ request: request, success: onload, error: onerror });
         log('Perform SIDX load: ' + info.url);
     }
 
     function reset() {
+        xhrLoader.abort();
+        xhrLoader = null;
         errHandler = null;
         boxParser = null;
         requestModifier = null;
-        log = null;
     }
 
     function getSegmentsForSidx(sidx, info) {
@@ -17481,8 +17722,9 @@ function SegmentBaseLoader() {
             size = refs[i].referenced_size;
 
             segment = new Segment();
+            // note that we don't explicitly set segment.media as this will be
+            // computed when all BaseURLs are resolved later
             segment.duration = duration;
-            segment.media = info.url;
             segment.startTime = time;
             segment.timescale = timescale;
             end = start + size - 1;
@@ -17515,16 +17757,18 @@ function SegmentBaseLoader() {
         return initRange;
     }
 
-    function sendRequest(request, info) {
+    function getFragmentRequest(info) {
         if (!info.url) {
             return;
         }
 
-        request.open('GET', requestModifier.modifyRequestURL(info.url));
-        request.responseType = 'arraybuffer';
-        request.setRequestHeader('Range', 'bytes=' + info.range.start + '-' + info.range.end);
-        request = requestModifier.modifyRequestHeader(request);
-        request.send(null);
+        var request = new FragmentRequest();
+
+        request.type = info.init ? HTTPRequest.INIT_SEGMENT_TYPE : HTTPRequest.MEDIA_SEGMENT_TYPE;
+        request.url = info.url;
+        request.range = info.range.start + '-' + info.range.end;
+
+        return request;
     }
 
     function onLoaded(segments, representation, type) {
@@ -17902,7 +18146,7 @@ function WebmSegmentBaseLoader() {
     function initialize() {
         errHandler = factory$8(context).getInstance();
         requestModifier = RequestModifier$1(context).getInstance();
-        xhrLoader = factory$16(context).create({
+        xhrLoader = factory$20(context).create({
             errHandler: errHandler,
             metricsModel: metricsModel,
             requestModifier: requestModifier
@@ -17973,7 +18217,7 @@ function WebmSegmentBaseLoader() {
         return cues;
     }
 
-    function parseSegments(data, media, segmentStart, segmentEnd, segmentDuration) {
+    function parseSegments(data, segmentStart, segmentEnd, segmentDuration) {
         var duration = void 0;
         var parsed = void 0;
         var segments = void 0;
@@ -17999,8 +18243,9 @@ function WebmSegmentBaseLoader() {
                 duration = segmentDuration - parsed[i].CueTime;
             }
 
+            // note that we don't explicitly set segment.media as this will be
+            // computed when all BaseURLs are resolved later
             segment.duration = duration;
-            segment.media = media;
             segment.startTime = parsed[i].CueTime;
             segment.timescale = 1000; // hardcoded for ms
             start = parsed[i].CueTracks[0].ClusterPosition + segmentStart;
@@ -18076,7 +18321,7 @@ function WebmSegmentBaseLoader() {
         request = getFragmentRequest(info);
 
         var onload = function onload(response) {
-            segments = parseSegments(response, info.url, segmentStart, segmentEnd, duration);
+            segments = parseSegments(response, segmentStart, segmentEnd, duration);
             callback(segments);
         };
 
@@ -18110,7 +18355,8 @@ function WebmSegmentBaseLoader() {
         request = getFragmentRequest(info);
 
         var onload = function onload() {
-            representation.initialization = info.url;
+            // note that we don't explicitly set rep.initialization as this
+            // will be computed when all BaseURLs are resolved later
             eventBus.trigger(events.INITIALIZATION_LOADED, { representation: representation });
         };
 
@@ -18493,7 +18739,7 @@ function Stream(config) {
         });
         segmentBaseLoader.initialize();
 
-        var handler = factory$17(context).create({
+        var handler = factory$21(context).create({
             segmentBaseLoader: segmentBaseLoader,
             timelineConverter: timelineConverter,
             dashMetrics: DashMetrics$1(context).getInstance(),
@@ -20090,542 +20336,533 @@ function VTTParser() {
 VTTParser.__dashjs_factory_name = 'VTTParser';
 var VTTParser$1 = FactoryMaker.getSingletonFactory(VTTParser);
 
-var xml2json = createCommonjsModule(function (module, exports) {
-    /*
-     Copyright 2011-2013 Abdulla Abdurakhmanov
-     Original sources are available at https://code.google.com/p/x2js/
-    
-     Licensed under the Apache License, Version 2.0 (the "License");
-     you may not use this file except in compliance with the License.
-     You may obtain a copy of the License at
-    
-     http://www.apache.org/licenses/LICENSE-2.0
-    
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     See the License for the specific language governing permissions and
-     limitations under the License.
-     */
+/*
+ Copyright 2011-2013 Abdulla Abdurakhmanov
+ Original sources are available at https://code.google.com/p/x2js/
 
-    /*
-      Further modified for dashjs to:
-      - keep track of children nodes in order in attribute __children.
-      - add type conversion matchers
-      - re-add ignoreRoot
-      - allow zero-length attributePrefix
-      - don't add white-space text nodes
-    */
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
 
-    (function (root, factory) {
-        if (typeof undefined === "function" && undefined.amd) {
-            undefined([], factory);
-        } else {
-            module.exports = factory();
+ http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ */
+
+/*
+  Further modified for dashjs to:
+  - keep track of children nodes in order in attribute __children.
+  - add type conversion matchers
+  - re-add ignoreRoot
+  - allow zero-length attributePrefix
+  - don't add white-space text nodes
+  - remove explicit RequireJS support
+*/
+
+function X2JS(config) {
+    'use strict';
+
+    var VERSION = "1.2.0";
+
+    config = config || {};
+    initConfigDefaults();
+    initRequiredPolyfills();
+
+    function initConfigDefaults() {
+        if (config.escapeMode === undefined) {
+            config.escapeMode = true;
         }
-    })(commonjsGlobal, function () {
-        return function (config) {
-            'use strict';
 
-            var VERSION = "1.2.0";
+        if (config.attributePrefix === undefined) {
+            config.attributePrefix = "_";
+        }
 
-            config = config || {};
-            initConfigDefaults();
-            initRequiredPolyfills();
+        config.arrayAccessForm = config.arrayAccessForm || "none";
+        config.emptyNodeForm = config.emptyNodeForm || "text";
 
-            function initConfigDefaults() {
-                if (config.escapeMode === undefined) {
-                    config.escapeMode = true;
-                }
+        if (config.enableToStringFunc === undefined) {
+            config.enableToStringFunc = true;
+        }
+        config.arrayAccessFormPaths = config.arrayAccessFormPaths || [];
+        if (config.skipEmptyTextNodesForObj === undefined) {
+            config.skipEmptyTextNodesForObj = true;
+        }
+        if (config.stripWhitespaces === undefined) {
+            config.stripWhitespaces = true;
+        }
+        config.datetimeAccessFormPaths = config.datetimeAccessFormPaths || [];
 
-                if (config.attributePrefix === undefined) {
-                    config.attributePrefix = "_";
-                }
+        if (config.useDoubleQuotes === undefined) {
+            config.useDoubleQuotes = false;
+        }
 
-                config.arrayAccessForm = config.arrayAccessForm || "none";
-                config.emptyNodeForm = config.emptyNodeForm || "text";
+        config.xmlElementsFilter = config.xmlElementsFilter || [];
+        config.jsonPropertiesFilter = config.jsonPropertiesFilter || [];
 
-                if (config.enableToStringFunc === undefined) {
-                    config.enableToStringFunc = true;
-                }
-                config.arrayAccessFormPaths = config.arrayAccessFormPaths || [];
-                if (config.skipEmptyTextNodesForObj === undefined) {
-                    config.skipEmptyTextNodesForObj = true;
-                }
-                if (config.stripWhitespaces === undefined) {
-                    config.stripWhitespaces = true;
-                }
-                config.datetimeAccessFormPaths = config.datetimeAccessFormPaths || [];
+        if (config.keepCData === undefined) {
+            config.keepCData = false;
+        }
 
-                if (config.useDoubleQuotes === undefined) {
-                    config.useDoubleQuotes = false;
-                }
+        if (config.ignoreRoot === undefined) {
+            config.ignoreRoot = false;
+        }
+    }
 
-                config.xmlElementsFilter = config.xmlElementsFilter || [];
-                config.jsonPropertiesFilter = config.jsonPropertiesFilter || [];
+    var DOMNodeTypes = {
+        ELEMENT_NODE: 1,
+        TEXT_NODE: 3,
+        CDATA_SECTION_NODE: 4,
+        COMMENT_NODE: 8,
+        DOCUMENT_NODE: 9
+    };
 
-                if (config.keepCData === undefined) {
-                    config.keepCData = false;
-                }
+    function initRequiredPolyfills() {}
 
-                if (config.ignoreRoot === undefined) {
-                    config.ignoreRoot = false;
-                }
+    function getNodeLocalName(node) {
+        var nodeLocalName = node.localName;
+        if (nodeLocalName == null) // Yeah, this is IE!!
+            nodeLocalName = node.baseName;
+        if (nodeLocalName == null || nodeLocalName == "") // =="" is IE too
+            nodeLocalName = node.nodeName;
+        return nodeLocalName;
+    }
+
+    function getNodePrefix(node) {
+        return node.prefix;
+    }
+
+    function escapeXmlChars(str) {
+        if (typeof str == "string") return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');else return str;
+    }
+
+    function checkInStdFiltersArrayForm(stdFiltersArrayForm, obj, name, path) {
+        var idx = 0;
+        for (; idx < stdFiltersArrayForm.length; idx++) {
+            var filterPath = stdFiltersArrayForm[idx];
+            if (typeof filterPath === "string") {
+                if (filterPath == path) break;
+            } else if (filterPath instanceof RegExp) {
+                if (filterPath.test(path)) break;
+            } else if (typeof filterPath === "function") {
+                if (filterPath(obj, name, path)) break;
             }
+        }
+        return idx != stdFiltersArrayForm.length;
+    }
 
-            var DOMNodeTypes = {
-                ELEMENT_NODE: 1,
-                TEXT_NODE: 3,
-                CDATA_SECTION_NODE: 4,
-                COMMENT_NODE: 8,
-                DOCUMENT_NODE: 9
-            };
+    function toArrayAccessForm(obj, childName, path) {
+        switch (config.arrayAccessForm) {
+            case "property":
+                if (!(obj[childName] instanceof Array)) obj[childName + "_asArray"] = [obj[childName]];else obj[childName + "_asArray"] = obj[childName];
+                break;
+            /*case "none":
+                break;*/
+        }
 
-            function initRequiredPolyfills() {}
-
-            function getNodeLocalName(node) {
-                var nodeLocalName = node.localName;
-                if (nodeLocalName == null) // Yeah, this is IE!!
-                    nodeLocalName = node.baseName;
-                if (nodeLocalName == null || nodeLocalName == "") // =="" is IE too
-                    nodeLocalName = node.nodeName;
-                return nodeLocalName;
+        if (!(obj[childName] instanceof Array) && config.arrayAccessFormPaths.length > 0) {
+            if (checkInStdFiltersArrayForm(config.arrayAccessFormPaths, obj, childName, path)) {
+                obj[childName] = [obj[childName]];
             }
+        }
+    }
 
-            function getNodePrefix(node) {
-                return node.prefix;
-            }
+    function fromXmlDateTime(prop) {
+        // Implementation based up on http://stackoverflow.com/questions/8178598/xml-datetime-to-javascript-date-object
+        // Improved to support full spec and optional parts
+        var bits = prop.split(/[-T:+Z]/g);
 
-            function escapeXmlChars(str) {
-                if (typeof str == "string") return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');else return str;
-            }
+        var d = new Date(bits[0], bits[1] - 1, bits[2]);
+        var secondBits = bits[5].split("\.");
+        d.setHours(bits[3], bits[4], secondBits[0]);
+        if (secondBits.length > 1) d.setMilliseconds(secondBits[1]);
 
-            function checkInStdFiltersArrayForm(stdFiltersArrayForm, obj, name, path) {
-                var idx = 0;
-                for (; idx < stdFiltersArrayForm.length; idx++) {
-                    var filterPath = stdFiltersArrayForm[idx];
-                    if (typeof filterPath === "string") {
-                        if (filterPath == path) break;
-                    } else if (filterPath instanceof RegExp) {
-                        if (filterPath.test(path)) break;
-                    } else if (typeof filterPath === "function") {
-                        if (filterPath(obj, name, path)) break;
-                    }
-                }
-                return idx != stdFiltersArrayForm.length;
-            }
+        // Get supplied time zone offset in minutes
+        if (bits[6] && bits[7]) {
+            var offsetMinutes = bits[6] * 60 + Number(bits[7]);
+            var sign = /\d\d-\d\d:\d\d$/.test(prop) ? '-' : '+';
 
-            function toArrayAccessForm(obj, childName, path) {
-                switch (config.arrayAccessForm) {
-                    case "property":
-                        if (!(obj[childName] instanceof Array)) obj[childName + "_asArray"] = [obj[childName]];else obj[childName + "_asArray"] = obj[childName];
-                        break;
-                    /*case "none":
-                        break;*/
-                }
+            // Apply the sign
+            offsetMinutes = 0 + (sign == '-' ? -1 * offsetMinutes : offsetMinutes);
 
-                if (!(obj[childName] instanceof Array) && config.arrayAccessFormPaths.length > 0) {
-                    if (checkInStdFiltersArrayForm(config.arrayAccessFormPaths, obj, childName, path)) {
-                        obj[childName] = [obj[childName]];
-                    }
-                }
-            }
+            // Apply offset and local timezone
+            d.setMinutes(d.getMinutes() - offsetMinutes - d.getTimezoneOffset());
+        } else if (prop.indexOf("Z", prop.length - 1) !== -1) {
+            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()));
+        }
 
-            function fromXmlDateTime(prop) {
-                // Implementation based up on http://stackoverflow.com/questions/8178598/xml-datetime-to-javascript-date-object
-                // Improved to support full spec and optional parts
-                var bits = prop.split(/[-T:+Z]/g);
+        // d is now a local time equivalent to the supplied time
+        return d;
+    }
 
-                var d = new Date(bits[0], bits[1] - 1, bits[2]);
-                var secondBits = bits[5].split("\.");
-                d.setHours(bits[3], bits[4], secondBits[0]);
-                if (secondBits.length > 1) d.setMilliseconds(secondBits[1]);
+    function checkFromXmlDateTimePaths(value, childName, fullPath) {
+        if (config.datetimeAccessFormPaths.length > 0) {
+            var path = fullPath.split("\.#")[0];
+            if (checkInStdFiltersArrayForm(config.datetimeAccessFormPaths, value, childName, path)) {
+                return fromXmlDateTime(value);
+            } else return value;
+        } else return value;
+    }
 
-                // Get supplied time zone offset in minutes
-                if (bits[6] && bits[7]) {
-                    var offsetMinutes = bits[6] * 60 + Number(bits[7]);
-                    var sign = /\d\d-\d\d:\d\d$/.test(prop) ? '-' : '+';
+    function checkXmlElementsFilter(obj, childType, childName, childPath) {
+        if (childType == DOMNodeTypes.ELEMENT_NODE && config.xmlElementsFilter.length > 0) {
+            return checkInStdFiltersArrayForm(config.xmlElementsFilter, obj, childName, childPath);
+        } else return true;
+    }
 
-                    // Apply the sign
-                    offsetMinutes = 0 + (sign == '-' ? -1 * offsetMinutes : offsetMinutes);
-
-                    // Apply offset and local timezone
-                    d.setMinutes(d.getMinutes() - offsetMinutes - d.getTimezoneOffset());
-                } else if (prop.indexOf("Z", prop.length - 1) !== -1) {
-                    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()));
-                }
-
-                // d is now a local time equivalent to the supplied time
-                return d;
-            }
-
-            function checkFromXmlDateTimePaths(value, childName, fullPath) {
-                if (config.datetimeAccessFormPaths.length > 0) {
-                    var path = fullPath.split("\.#")[0];
-                    if (checkInStdFiltersArrayForm(config.datetimeAccessFormPaths, value, childName, path)) {
-                        return fromXmlDateTime(value);
-                    } else return value;
-                } else return value;
-            }
-
-            function checkXmlElementsFilter(obj, childType, childName, childPath) {
-                if (childType == DOMNodeTypes.ELEMENT_NODE && config.xmlElementsFilter.length > 0) {
-                    return checkInStdFiltersArrayForm(config.xmlElementsFilter, obj, childName, childPath);
-                } else return true;
-            }
-
-            function parseDOMChildren(node, path) {
-                if (node.nodeType == DOMNodeTypes.DOCUMENT_NODE) {
-                    var result = new Object();
-                    var nodeChildren = node.childNodes;
-                    // Alternative for firstElementChild which is not supported in some environments
-                    for (var cidx = 0; cidx < nodeChildren.length; cidx++) {
-                        var child = nodeChildren.item(cidx);
-                        if (child.nodeType == DOMNodeTypes.ELEMENT_NODE) {
-                            if (config.ignoreRoot) {
-                                result = parseDOMChildren(child);
-                            } else {
-                                result = {};
-                                var childName = getNodeLocalName(child);
-                                result[childName] = parseDOMChildren(child);
-                            }
-                        }
-                    }
-                    return result;
-                } else if (node.nodeType == DOMNodeTypes.ELEMENT_NODE) {
-                    var result = new Object();
-                    result.__cnt = 0;
-
-                    var children = [];
-                    var nodeChildren = node.childNodes;
-
-                    // Children nodes
-                    for (var cidx = 0; cidx < nodeChildren.length; cidx++) {
-                        var child = nodeChildren.item(cidx); // nodeChildren[cidx];
+    function parseDOMChildren(node, path) {
+        if (node.nodeType == DOMNodeTypes.DOCUMENT_NODE) {
+            var result = new Object();
+            var nodeChildren = node.childNodes;
+            // Alternative for firstElementChild which is not supported in some environments
+            for (var cidx = 0; cidx < nodeChildren.length; cidx++) {
+                var child = nodeChildren.item(cidx);
+                if (child.nodeType == DOMNodeTypes.ELEMENT_NODE) {
+                    if (config.ignoreRoot) {
+                        result = parseDOMChildren(child);
+                    } else {
+                        result = {};
                         var childName = getNodeLocalName(child);
-
-                        if (child.nodeType != DOMNodeTypes.COMMENT_NODE) {
-                            var childPath = path + "." + childName;
-                            if (checkXmlElementsFilter(result, child.nodeType, childName, childPath)) {
-                                result.__cnt++;
-                                if (result[childName] == null) {
-                                    var c = parseDOMChildren(child, childPath);
-                                    if (childName != "#text" || /[^\s]/.test(c)) {
-                                        var o = {};
-                                        o[childName] = c;
-                                        children.push(o);
-                                    }
-                                    result[childName] = c;
-                                    toArrayAccessForm(result, childName, childPath);
-                                } else {
-                                    if (result[childName] != null) {
-                                        if (!(result[childName] instanceof Array)) {
-                                            result[childName] = [result[childName]];
-                                            toArrayAccessForm(result, childName, childPath);
-                                        }
-                                    }
-
-                                    var c = parseDOMChildren(child, childPath);
-                                    if (childName != "#text" || /[^\s]/.test(c)) {
-                                        // Don't add white-space text nodes
-                                        var o = {};
-                                        o[childName] = c;
-                                        children.push(o);
-                                    }
-                                    result[childName][result[childName].length] = c;
-                                }
-                            }
-                        }
+                        result[childName] = parseDOMChildren(child);
                     }
+                }
+            }
+            return result;
+        } else if (node.nodeType == DOMNodeTypes.ELEMENT_NODE) {
+            var result = new Object();
+            result.__cnt = 0;
 
-                    result.__children = children;
+            var children = [];
+            var nodeChildren = node.childNodes;
 
-                    // Attributes
-                    var nodeLocalName = getNodeLocalName(node);
-                    for (var aidx = 0; aidx < node.attributes.length; aidx++) {
-                        var attr = node.attributes.item(aidx); // [aidx];
+            // Children nodes
+            for (var cidx = 0; cidx < nodeChildren.length; cidx++) {
+                var child = nodeChildren.item(cidx); // nodeChildren[cidx];
+                var childName = getNodeLocalName(child);
+
+                if (child.nodeType != DOMNodeTypes.COMMENT_NODE) {
+                    var childPath = path + "." + childName;
+                    if (checkXmlElementsFilter(result, child.nodeType, childName, childPath)) {
                         result.__cnt++;
-
-                        var value2 = attr.value;
-                        for (var m = 0, ml = config.matchers.length; m < ml; m++) {
-                            var matchobj = config.matchers[m];
-                            if (matchobj.test(attr, nodeLocalName)) value2 = matchobj.converter(attr.value);
-                        }
-
-                        result[config.attributePrefix + attr.name] = value2;
-                    }
-
-                    // Node namespace prefix
-                    var nodePrefix = getNodePrefix(node);
-                    if (nodePrefix != null && nodePrefix != "") {
-                        result.__cnt++;
-                        result.__prefix = nodePrefix;
-                    }
-
-                    if (result["#text"] != null) {
-                        result.__text = result["#text"];
-                        if (result.__text instanceof Array) {
-                            result.__text = result.__text.join("\n");
-                        }
-                        //if(config.escapeMode)
-                        //	result.__text = unescapeXmlChars(result.__text);
-                        if (config.stripWhitespaces) result.__text = result.__text.trim();
-                        delete result["#text"];
-                        if (config.arrayAccessForm == "property") delete result["#text_asArray"];
-                        result.__text = checkFromXmlDateTimePaths(result.__text, childName, path + "." + childName);
-                    }
-                    if (result["#cdata-section"] != null) {
-                        result.__cdata = result["#cdata-section"];
-                        delete result["#cdata-section"];
-                        if (config.arrayAccessForm == "property") delete result["#cdata-section_asArray"];
-                    }
-
-                    if (result.__cnt == 0 && config.emptyNodeForm == "text") {
-                        result = '';
-                    } else if (result.__cnt == 1 && result.__text != null) {
-                        result = result.__text;
-                    } else if (result.__cnt == 1 && result.__cdata != null && !config.keepCData) {
-                        result = result.__cdata;
-                    } else if (result.__cnt > 1 && result.__text != null && config.skipEmptyTextNodesForObj) {
-                        if (config.stripWhitespaces && result.__text == "" || result.__text.trim() == "") {
-                            delete result.__text;
-                        }
-                    }
-                    delete result.__cnt;
-
-                    if (config.enableToStringFunc && (result.__text != null || result.__cdata != null)) {
-                        result.toString = function () {
-                            return (this.__text != null ? this.__text : '') + (this.__cdata != null ? this.__cdata : '');
-                        };
-                    }
-
-                    return result;
-                } else if (node.nodeType == DOMNodeTypes.TEXT_NODE || node.nodeType == DOMNodeTypes.CDATA_SECTION_NODE) {
-                    return node.nodeValue;
-                }
-            }
-
-            function startTag(jsonObj, element, attrList, closed) {
-                var resultStr = "<" + (jsonObj != null && jsonObj.__prefix != null ? jsonObj.__prefix + ":" : "") + element;
-                if (attrList != null) {
-                    for (var aidx = 0; aidx < attrList.length; aidx++) {
-                        var attrName = attrList[aidx];
-                        var attrVal = jsonObj[attrName];
-                        if (config.escapeMode) attrVal = escapeXmlChars(attrVal);
-                        resultStr += " " + attrName.substr(config.attributePrefix.length) + "=";
-                        if (config.useDoubleQuotes) resultStr += '"' + attrVal + '"';else resultStr += "'" + attrVal + "'";
-                    }
-                }
-                if (!closed) resultStr += ">";else resultStr += "/>";
-                return resultStr;
-            }
-
-            function endTag(jsonObj, elementName) {
-                return "</" + (jsonObj.__prefix != null ? jsonObj.__prefix + ":" : "") + elementName + ">";
-            }
-
-            function endsWith(str, suffix) {
-                return str.indexOf(suffix, str.length - suffix.length) !== -1;
-            }
-
-            function jsonXmlSpecialElem(jsonObj, jsonObjField) {
-                if (config.arrayAccessForm == "property" && endsWith(jsonObjField.toString(), "_asArray") || jsonObjField.toString().indexOf(config.attributePrefix) == 0 || jsonObjField.toString().indexOf("__") == 0 || jsonObj[jsonObjField] instanceof Function) return true;else return false;
-            }
-
-            function jsonXmlElemCount(jsonObj) {
-                var elementsCnt = 0;
-                if (jsonObj instanceof Object) {
-                    for (var it in jsonObj) {
-                        if (jsonXmlSpecialElem(jsonObj, it)) continue;
-                        elementsCnt++;
-                    }
-                }
-                return elementsCnt;
-            }
-
-            function checkJsonObjPropertiesFilter(jsonObj, propertyName, jsonObjPath) {
-                return config.jsonPropertiesFilter.length == 0 || jsonObjPath == "" || checkInStdFiltersArrayForm(config.jsonPropertiesFilter, jsonObj, propertyName, jsonObjPath);
-            }
-
-            function parseJSONAttributes(jsonObj) {
-                var attrList = [];
-                if (jsonObj instanceof Object) {
-                    for (var ait in jsonObj) {
-                        if (ait.toString().indexOf("__") == -1 && ait.toString().indexOf(config.attributePrefix) == 0) {
-                            attrList.push(ait);
-                        }
-                    }
-                }
-                return attrList;
-            }
-
-            function parseJSONTextAttrs(jsonTxtObj) {
-                var result = "";
-
-                if (jsonTxtObj.__cdata != null) {
-                    result += "<![CDATA[" + jsonTxtObj.__cdata + "]]>";
-                }
-
-                if (jsonTxtObj.__text != null) {
-                    if (config.escapeMode) result += escapeXmlChars(jsonTxtObj.__text);else result += jsonTxtObj.__text;
-                }
-                return result;
-            }
-
-            function parseJSONTextObject(jsonTxtObj) {
-                var result = "";
-
-                if (jsonTxtObj instanceof Object) {
-                    result += parseJSONTextAttrs(jsonTxtObj);
-                } else if (jsonTxtObj != null) {
-                    if (config.escapeMode) result += escapeXmlChars(jsonTxtObj);else result += jsonTxtObj;
-                }
-
-                return result;
-            }
-
-            function getJsonPropertyPath(jsonObjPath, jsonPropName) {
-                if (jsonObjPath === "") {
-                    return jsonPropName;
-                } else return jsonObjPath + "." + jsonPropName;
-            }
-
-            function parseJSONArray(jsonArrRoot, jsonArrObj, attrList, jsonObjPath) {
-                var result = "";
-                if (jsonArrRoot.length == 0) {
-                    result += startTag(jsonArrRoot, jsonArrObj, attrList, true);
-                } else {
-                    for (var arIdx = 0; arIdx < jsonArrRoot.length; arIdx++) {
-                        result += startTag(jsonArrRoot[arIdx], jsonArrObj, parseJSONAttributes(jsonArrRoot[arIdx]), false);
-                        result += parseJSONObject(jsonArrRoot[arIdx], getJsonPropertyPath(jsonObjPath, jsonArrObj));
-                        result += endTag(jsonArrRoot[arIdx], jsonArrObj);
-                    }
-                }
-                return result;
-            }
-
-            function parseJSONObject(jsonObj, jsonObjPath) {
-                var result = "";
-
-                var elementsCnt = jsonXmlElemCount(jsonObj);
-
-                if (elementsCnt > 0) {
-                    for (var it in jsonObj) {
-
-                        if (jsonXmlSpecialElem(jsonObj, it) || jsonObjPath != "" && !checkJsonObjPropertiesFilter(jsonObj, it, getJsonPropertyPath(jsonObjPath, it))) continue;
-
-                        var subObj = jsonObj[it];
-
-                        var attrList = parseJSONAttributes(subObj);
-
-                        if (subObj == null || subObj == undefined) {
-                            result += startTag(subObj, it, attrList, true);
-                        } else if (subObj instanceof Object) {
-
-                            if (subObj instanceof Array) {
-                                result += parseJSONArray(subObj, it, attrList, jsonObjPath);
-                            } else if (subObj instanceof Date) {
-                                result += startTag(subObj, it, attrList, false);
-                                result += subObj.toISOString();
-                                result += endTag(subObj, it);
-                            } else {
-                                var subObjElementsCnt = jsonXmlElemCount(subObj);
-                                if (subObjElementsCnt > 0 || subObj.__text != null || subObj.__cdata != null) {
-                                    result += startTag(subObj, it, attrList, false);
-                                    result += parseJSONObject(subObj, getJsonPropertyPath(jsonObjPath, it));
-                                    result += endTag(subObj, it);
-                                } else {
-                                    result += startTag(subObj, it, attrList, true);
-                                }
+                        if (result[childName] == null) {
+                            var c = parseDOMChildren(child, childPath);
+                            if (childName != "#text" || /[^\s]/.test(c)) {
+                                var o = {};
+                                o[childName] = c;
+                                children.push(o);
                             }
+                            result[childName] = c;
+                            toArrayAccessForm(result, childName, childPath);
                         } else {
-                            result += startTag(subObj, it, attrList, false);
-                            result += parseJSONTextObject(subObj);
-                            result += endTag(subObj, it);
+                            if (result[childName] != null) {
+                                if (!(result[childName] instanceof Array)) {
+                                    result[childName] = [result[childName]];
+                                    toArrayAccessForm(result, childName, childPath);
+                                }
+                            }
+
+                            var c = parseDOMChildren(child, childPath);
+                            if (childName != "#text" || /[^\s]/.test(c)) {
+                                // Don't add white-space text nodes
+                                var o = {};
+                                o[childName] = c;
+                                children.push(o);
+                            }
+                            result[childName][result[childName].length] = c;
                         }
                     }
                 }
-                result += parseJSONTextObject(jsonObj);
-
-                return result;
             }
 
-            this.parseXmlString = function (xmlDocStr) {
-                var isIEParser = window.ActiveXObject || "ActiveXObject" in window;
-                if (xmlDocStr === undefined) {
-                    return null;
+            result.__children = children;
+
+            // Attributes
+            var nodeLocalName = getNodeLocalName(node);
+            for (var aidx = 0; aidx < node.attributes.length; aidx++) {
+                var attr = node.attributes.item(aidx); // [aidx];
+                result.__cnt++;
+
+                var value2 = attr.value;
+                for (var m = 0, ml = config.matchers.length; m < ml; m++) {
+                    var matchobj = config.matchers[m];
+                    if (matchobj.test(attr, nodeLocalName)) value2 = matchobj.converter(attr.value);
                 }
-                var xmlDoc;
-                if (window.DOMParser) {
-                    var parser = new window.DOMParser();
-                    var parsererrorNS = null;
-                    // IE9+ now is here
-                    if (!isIEParser) {
-                        try {
-                            parsererrorNS = parser.parseFromString("INVALID", "text/xml").getElementsByTagName("parsererror")[0].namespaceURI;
-                        } catch (err) {
-                            parsererrorNS = null;
+
+                result[config.attributePrefix + attr.name] = value2;
+            }
+
+            // Node namespace prefix
+            var nodePrefix = getNodePrefix(node);
+            if (nodePrefix != null && nodePrefix != "") {
+                result.__cnt++;
+                result.__prefix = nodePrefix;
+            }
+
+            if (result["#text"] != null) {
+                result.__text = result["#text"];
+                if (result.__text instanceof Array) {
+                    result.__text = result.__text.join("\n");
+                }
+                //if(config.escapeMode)
+                //	result.__text = unescapeXmlChars(result.__text);
+                if (config.stripWhitespaces) result.__text = result.__text.trim();
+                delete result["#text"];
+                if (config.arrayAccessForm == "property") delete result["#text_asArray"];
+                result.__text = checkFromXmlDateTimePaths(result.__text, childName, path + "." + childName);
+            }
+            if (result["#cdata-section"] != null) {
+                result.__cdata = result["#cdata-section"];
+                delete result["#cdata-section"];
+                if (config.arrayAccessForm == "property") delete result["#cdata-section_asArray"];
+            }
+
+            if (result.__cnt == 0 && config.emptyNodeForm == "text") {
+                result = '';
+            } else if (result.__cnt == 1 && result.__text != null) {
+                result = result.__text;
+            } else if (result.__cnt == 1 && result.__cdata != null && !config.keepCData) {
+                result = result.__cdata;
+            } else if (result.__cnt > 1 && result.__text != null && config.skipEmptyTextNodesForObj) {
+                if (config.stripWhitespaces && result.__text == "" || result.__text.trim() == "") {
+                    delete result.__text;
+                }
+            }
+            delete result.__cnt;
+
+            if (config.enableToStringFunc && (result.__text != null || result.__cdata != null)) {
+                result.toString = function () {
+                    return (this.__text != null ? this.__text : '') + (this.__cdata != null ? this.__cdata : '');
+                };
+            }
+
+            return result;
+        } else if (node.nodeType == DOMNodeTypes.TEXT_NODE || node.nodeType == DOMNodeTypes.CDATA_SECTION_NODE) {
+            return node.nodeValue;
+        }
+    }
+
+    function startTag(jsonObj, element, attrList, closed) {
+        var resultStr = "<" + (jsonObj != null && jsonObj.__prefix != null ? jsonObj.__prefix + ":" : "") + element;
+        if (attrList != null) {
+            for (var aidx = 0; aidx < attrList.length; aidx++) {
+                var attrName = attrList[aidx];
+                var attrVal = jsonObj[attrName];
+                if (config.escapeMode) attrVal = escapeXmlChars(attrVal);
+                resultStr += " " + attrName.substr(config.attributePrefix.length) + "=";
+                if (config.useDoubleQuotes) resultStr += '"' + attrVal + '"';else resultStr += "'" + attrVal + "'";
+            }
+        }
+        if (!closed) resultStr += ">";else resultStr += "/>";
+        return resultStr;
+    }
+
+    function endTag(jsonObj, elementName) {
+        return "</" + (jsonObj.__prefix != null ? jsonObj.__prefix + ":" : "") + elementName + ">";
+    }
+
+    function endsWith(str, suffix) {
+        return str.indexOf(suffix, str.length - suffix.length) !== -1;
+    }
+
+    function jsonXmlSpecialElem(jsonObj, jsonObjField) {
+        if (config.arrayAccessForm == "property" && endsWith(jsonObjField.toString(), "_asArray") || jsonObjField.toString().indexOf(config.attributePrefix) == 0 || jsonObjField.toString().indexOf("__") == 0 || jsonObj[jsonObjField] instanceof Function) return true;else return false;
+    }
+
+    function jsonXmlElemCount(jsonObj) {
+        var elementsCnt = 0;
+        if (jsonObj instanceof Object) {
+            for (var it in jsonObj) {
+                if (jsonXmlSpecialElem(jsonObj, it)) continue;
+                elementsCnt++;
+            }
+        }
+        return elementsCnt;
+    }
+
+    function checkJsonObjPropertiesFilter(jsonObj, propertyName, jsonObjPath) {
+        return config.jsonPropertiesFilter.length == 0 || jsonObjPath == "" || checkInStdFiltersArrayForm(config.jsonPropertiesFilter, jsonObj, propertyName, jsonObjPath);
+    }
+
+    function parseJSONAttributes(jsonObj) {
+        var attrList = [];
+        if (jsonObj instanceof Object) {
+            for (var ait in jsonObj) {
+                if (ait.toString().indexOf("__") == -1 && ait.toString().indexOf(config.attributePrefix) == 0) {
+                    attrList.push(ait);
+                }
+            }
+        }
+        return attrList;
+    }
+
+    function parseJSONTextAttrs(jsonTxtObj) {
+        var result = "";
+
+        if (jsonTxtObj.__cdata != null) {
+            result += "<![CDATA[" + jsonTxtObj.__cdata + "]]>";
+        }
+
+        if (jsonTxtObj.__text != null) {
+            if (config.escapeMode) result += escapeXmlChars(jsonTxtObj.__text);else result += jsonTxtObj.__text;
+        }
+        return result;
+    }
+
+    function parseJSONTextObject(jsonTxtObj) {
+        var result = "";
+
+        if (jsonTxtObj instanceof Object) {
+            result += parseJSONTextAttrs(jsonTxtObj);
+        } else if (jsonTxtObj != null) {
+            if (config.escapeMode) result += escapeXmlChars(jsonTxtObj);else result += jsonTxtObj;
+        }
+
+        return result;
+    }
+
+    function getJsonPropertyPath(jsonObjPath, jsonPropName) {
+        if (jsonObjPath === "") {
+            return jsonPropName;
+        } else return jsonObjPath + "." + jsonPropName;
+    }
+
+    function parseJSONArray(jsonArrRoot, jsonArrObj, attrList, jsonObjPath) {
+        var result = "";
+        if (jsonArrRoot.length == 0) {
+            result += startTag(jsonArrRoot, jsonArrObj, attrList, true);
+        } else {
+            for (var arIdx = 0; arIdx < jsonArrRoot.length; arIdx++) {
+                result += startTag(jsonArrRoot[arIdx], jsonArrObj, parseJSONAttributes(jsonArrRoot[arIdx]), false);
+                result += parseJSONObject(jsonArrRoot[arIdx], getJsonPropertyPath(jsonObjPath, jsonArrObj));
+                result += endTag(jsonArrRoot[arIdx], jsonArrObj);
+            }
+        }
+        return result;
+    }
+
+    function parseJSONObject(jsonObj, jsonObjPath) {
+        var result = "";
+
+        var elementsCnt = jsonXmlElemCount(jsonObj);
+
+        if (elementsCnt > 0) {
+            for (var it in jsonObj) {
+
+                if (jsonXmlSpecialElem(jsonObj, it) || jsonObjPath != "" && !checkJsonObjPropertiesFilter(jsonObj, it, getJsonPropertyPath(jsonObjPath, it))) continue;
+
+                var subObj = jsonObj[it];
+
+                var attrList = parseJSONAttributes(subObj);
+
+                if (subObj == null || subObj == undefined) {
+                    result += startTag(subObj, it, attrList, true);
+                } else if (subObj instanceof Object) {
+
+                    if (subObj instanceof Array) {
+                        result += parseJSONArray(subObj, it, attrList, jsonObjPath);
+                    } else if (subObj instanceof Date) {
+                        result += startTag(subObj, it, attrList, false);
+                        result += subObj.toISOString();
+                        result += endTag(subObj, it);
+                    } else {
+                        var subObjElementsCnt = jsonXmlElemCount(subObj);
+                        if (subObjElementsCnt > 0 || subObj.__text != null || subObj.__cdata != null) {
+                            result += startTag(subObj, it, attrList, false);
+                            result += parseJSONObject(subObj, getJsonPropertyPath(jsonObjPath, it));
+                            result += endTag(subObj, it);
+                        } else {
+                            result += startTag(subObj, it, attrList, true);
                         }
-                    }
-                    try {
-                        xmlDoc = parser.parseFromString(xmlDocStr, "text/xml");
-                        if (parsererrorNS != null && xmlDoc.getElementsByTagNameNS(parsererrorNS, "parsererror").length > 0) {
-                            //throw new Error('Error parsing XML: '+xmlDocStr);
-                            xmlDoc = null;
-                        }
-                    } catch (err) {
-                        xmlDoc = null;
                     }
                 } else {
-                    // IE :(
-                    if (xmlDocStr.indexOf("<?") == 0) {
-                        xmlDocStr = xmlDocStr.substr(xmlDocStr.indexOf("?>") + 2);
-                    }
-                    xmlDoc = new ActiveXObject("Microsoft.XMLDOM");
-                    xmlDoc.async = "false";
-                    xmlDoc.loadXML(xmlDocStr);
+                    result += startTag(subObj, it, attrList, false);
+                    result += parseJSONTextObject(subObj);
+                    result += endTag(subObj, it);
                 }
-                return xmlDoc;
-            };
+            }
+        }
+        result += parseJSONTextObject(jsonObj);
 
-            this.asArray = function (prop) {
-                if (prop === undefined || prop == null) return [];else if (prop instanceof Array) return prop;else return [prop];
-            };
+        return result;
+    }
 
-            this.toXmlDateTime = function (dt) {
-                if (dt instanceof Date) return dt.toISOString();else if (typeof dt === 'number') return new Date(dt).toISOString();else return null;
-            };
+    this.parseXmlString = function (xmlDocStr) {
+        var isIEParser = window.ActiveXObject || "ActiveXObject" in window;
+        if (xmlDocStr === undefined) {
+            return null;
+        }
+        var xmlDoc;
+        if (window.DOMParser) {
+            var parser = new window.DOMParser();
+            var parsererrorNS = null;
+            // IE9+ now is here
+            if (!isIEParser) {
+                try {
+                    parsererrorNS = parser.parseFromString("INVALID", "text/xml").getElementsByTagName("parsererror")[0].namespaceURI;
+                } catch (err) {
+                    parsererrorNS = null;
+                }
+            }
+            try {
+                xmlDoc = parser.parseFromString(xmlDocStr, "text/xml");
+                if (parsererrorNS != null && xmlDoc.getElementsByTagNameNS(parsererrorNS, "parsererror").length > 0) {
+                    //throw new Error('Error parsing XML: '+xmlDocStr);
+                    xmlDoc = null;
+                }
+            } catch (err) {
+                xmlDoc = null;
+            }
+        } else {
+            // IE :(
+            if (xmlDocStr.indexOf("<?") == 0) {
+                xmlDocStr = xmlDocStr.substr(xmlDocStr.indexOf("?>") + 2);
+            }
+            xmlDoc = new ActiveXObject("Microsoft.XMLDOM");
+            xmlDoc.async = "false";
+            xmlDoc.loadXML(xmlDocStr);
+        }
+        return xmlDoc;
+    };
 
-            this.asDateTime = function (prop) {
-                if (typeof prop == "string") {
-                    return fromXmlDateTime(prop);
-                } else return prop;
-            };
+    this.asArray = function (prop) {
+        if (prop === undefined || prop == null) return [];else if (prop instanceof Array) return prop;else return [prop];
+    };
 
-            this.xml2json = function (xmlDoc) {
-                return parseDOMChildren(xmlDoc);
-            };
+    this.toXmlDateTime = function (dt) {
+        if (dt instanceof Date) return dt.toISOString();else if (typeof dt === 'number') return new Date(dt).toISOString();else return null;
+    };
 
-            this.xml_str2json = function (xmlDocStr) {
-                var xmlDoc = this.parseXmlString(xmlDocStr);
-                if (xmlDoc != null) return this.xml2json(xmlDoc);else return null;
-            };
+    this.asDateTime = function (prop) {
+        if (typeof prop == "string") {
+            return fromXmlDateTime(prop);
+        } else return prop;
+    };
 
-            this.json2xml_str = function (jsonObj) {
-                return parseJSONObject(jsonObj, "");
-            };
+    this.xml2json = function (xmlDoc) {
+        return parseDOMChildren(xmlDoc);
+    };
 
-            this.json2xml = function (jsonObj) {
-                var xmlDocStr = this.json2xml_str(jsonObj);
-                return this.parseXmlString(xmlDocStr);
-            };
+    this.xml_str2json = function (xmlDocStr) {
+        var xmlDoc = this.parseXmlString(xmlDocStr);
+        if (xmlDoc != null) return this.xml2json(xmlDoc);else return null;
+    };
 
-            this.getVersion = function () {
-                return VERSION;
-            };
-        };
-    });
-});
+    this.json2xml_str = function (jsonObj) {
+        return parseJSONObject(jsonObj, "");
+    };
+
+    this.json2xml = function (jsonObj) {
+        var xmlDocStr = this.json2xml_str(jsonObj);
+        return this.parseXmlString(xmlDocStr);
+    };
+
+    this.getVersion = function () {
+        return VERSION;
+    };
+}
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -21262,7 +21499,7 @@ function TTMLParser() {
             rl: '-webkit-writing-mode: horizontal-tb;' + 'writing-mode: horizontal-tb;' + 'direction: rtl;',
             tb: '-webkit-writing-mode: vertical-rl;' + 'writing-mode: vertical-rl;' + '-webkit-text-orientation: upright;' + 'text-orientation: upright;'
         };
-        converter = new xml2json({
+        converter = new X2JS({
             escapeMode: false,
             attributePrefix: '',
             arrayAccessForm: 'property',
@@ -23289,12 +23526,13 @@ function PlaybackController() {
         var actualTime;
 
         if (!DVRWindow) return NaN;
-
-        if (currentTime >= DVRWindow.start && currentTime <= DVRWindow.end) {
+        if (currentTime > DVRWindow.end) {
+            actualTime = Math.max(DVRWindow.end - streamInfo.manifestInfo.minBufferTime * 2, DVRWindow.start);
+        } else if (currentTime < DVRWindow.start) {
+            actualTime = DVRWindow.start;
+        } else {
             return currentTime;
         }
-
-        actualTime = Math.max(DVRWindow.end - streamInfo.manifestInfo.minBufferTime * 2, DVRWindow.start);
 
         return actualTime;
     }
@@ -23591,7 +23829,7 @@ function XlinkLoader(config) {
     var context = this.context;
     var eventBus = factory$3(context).getInstance();
 
-    var xhrLoader = factory$16(context).create({
+    var xhrLoader = factory$20(context).create({
         errHandler: config.errHandler,
         metricsModel: config.metricsModel,
         requestModifier: config.requestModifier
@@ -23645,8 +23883,8 @@ function XlinkLoader(config) {
 
 XlinkLoader.__dashjs_factory_name = 'XlinkLoader';
 
-var factory$23 = FactoryMaker.getClassFactory(XlinkLoader);
-factory$23.XLINK_LOADER_ERROR_LOADING_FAILURE = XLINK_LOADER_ERROR_LOADING_FAILURE;
+var factory$27 = FactoryMaker.getClassFactory(XlinkLoader);
+factory$27.XLINK_LOADER_ERROR_LOADING_FAILURE = XLINK_LOADER_ERROR_LOADING_FAILURE;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -23701,7 +23939,7 @@ function XlinkController(config) {
     function setup() {
         eventBus.on(events.XLINK_ELEMENT_LOADED, onXlinkElementLoaded, instance);
 
-        xlinkLoader = factory$23(context).create({
+        xlinkLoader = factory$27(context).create({
             errHandler: config.errHandler,
             metricsModel: config.metricsModel,
             requestModifier: config.requestModifier
@@ -23723,7 +23961,7 @@ function XlinkController(config) {
     function resolveManifestOnLoad(mpd) {
         var elements;
         // First resolve all periods, so unnecessary requests inside onLoad Periods with Default content are avoided
-        converter = new xml2json({
+        converter = new X2JS({
             escapeMode: false,
             attributePrefix: '',
             arrayAccessForm: 'property',
@@ -23971,7 +24209,7 @@ function ManifestLoader(config) {
     function setup() {
         eventBus.on(events.XLINK_READY, onXlinkReady, instance);
 
-        xhrLoader = factory$16(context).create({
+        xhrLoader = factory$20(context).create({
             errHandler: config.errHandler,
             metricsModel: config.metricsModel,
             requestModifier: config.requestModifier
@@ -24070,9 +24308,9 @@ function ManifestLoader(config) {
 
 ManifestLoader.__dashjs_factory_name = 'ManifestLoader';
 
-var factory$22 = FactoryMaker.getClassFactory(ManifestLoader);
-factory$22.MANIFEST_LOADER_ERROR_PARSING_FAILURE = MANIFEST_LOADER_ERROR_PARSING_FAILURE;
-factory$22.MANIFEST_LOADER_ERROR_LOADING_FAILURE = MANIFEST_LOADER_ERROR_LOADING_FAILURE;
+var factory$26 = FactoryMaker.getClassFactory(ManifestLoader);
+factory$26.MANIFEST_LOADER_ERROR_PARSING_FAILURE = MANIFEST_LOADER_ERROR_PARSING_FAILURE;
+factory$26.MANIFEST_LOADER_ERROR_LOADING_FAILURE = MANIFEST_LOADER_ERROR_LOADING_FAILURE;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -24489,9 +24727,9 @@ function TimeSyncController() {
 }
 
 TimeSyncController.__dashjs_factory_name = 'TimeSyncController';
-var factory$24 = FactoryMaker.getSingletonFactory(TimeSyncController);
-factory$24.TIME_SYNC_FAILED_ERROR_CODE = TIME_SYNC_FAILED_ERROR_CODE;
-factory$24.HTTP_TIMEOUT_MS = HTTP_TIMEOUT_MS;
+var factory$28 = FactoryMaker.getSingletonFactory(TimeSyncController);
+factory$28.TIME_SYNC_FAILED_ERROR_CODE = TIME_SYNC_FAILED_ERROR_CODE;
+factory$28.HTTP_TIMEOUT_MS = HTTP_TIMEOUT_MS;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -25218,9 +25456,9 @@ function BaseURLSelector() {
 }
 
 BaseURLSelector.__dashjs_factory_name = 'BaseURLSelector';
-var factory$25 = FactoryMaker.getClassFactory(BaseURLSelector);
-factory$25.URL_RESOLUTION_FAILED_GENERIC_ERROR_CODE = URL_RESOLUTION_FAILED_GENERIC_ERROR_CODE;
-factory$25.URL_RESOLUTION_FAILED_GENERIC_ERROR_MESSAGE = URL_RESOLUTION_FAILED_GENERIC_ERROR_MESSAGE;
+var factory$29 = FactoryMaker.getClassFactory(BaseURLSelector);
+factory$29.URL_RESOLUTION_FAILED_GENERIC_ERROR_CODE = URL_RESOLUTION_FAILED_GENERIC_ERROR_CODE;
+factory$29.URL_RESOLUTION_FAILED_GENERIC_ERROR_MESSAGE = URL_RESOLUTION_FAILED_GENERIC_ERROR_MESSAGE;
 
 /**
  * The copyright in this software is being made available under the BSD License,
@@ -25270,7 +25508,7 @@ function BaseURLController() {
 
     function setup() {
         baseURLTreeModel = BaseURLTreeModel$1(context).create();
-        baseURLSelector = factory$25(context).create();
+        baseURLSelector = factory$29(context).create();
 
         eventBus.on(events.SERVICE_LOCATION_BLACKLIST_CHANGED, onBlackListChanged, instance);
     }
@@ -25339,7 +25577,7 @@ function BaseURLController() {
 BaseURLController.__dashjs_factory_name = 'BaseURLController';
 var BaseURLController$1 = FactoryMaker.getSingletonFactory(BaseURLController);
 
-var VERSION = '2.4.0';
+var VERSION = '2.4.1';
 function getVersionString() {
     return VERSION;
 }
@@ -26155,7 +26393,7 @@ function DashParser() /*config*/{
         matchers = [new DurationMatcher(), new DateTimeMatcher(), new NumericMatcher(), new StringMatcher() // last in list to take precedence over NumericMatcher
         ];
 
-        converter = new xml2json({
+        converter = new X2JS({
             escapeMode: false,
             attributePrefix: '',
             arrayAccessForm: 'property',
@@ -28026,7 +28264,7 @@ function MediaPlayer() {
 
     function createControllers() {
 
-        var abrRulesCollection = factory$12(context).getInstance();
+        var abrRulesCollection = factory$15(context).getInstance();
         abrRulesCollection.initialize();
 
         var sourceBufferController = factory$5(context).getInstance();
@@ -28053,7 +28291,7 @@ function MediaPlayer() {
             dashMetrics: dashMetrics,
             liveEdgeFinder: factory$9(context).getInstance(),
             mediaSourceController: MediaSourceController$1(context).getInstance(),
-            timeSyncController: factory$24(context).getInstance(),
+            timeSyncController: factory$28(context).getInstance(),
             baseURLController: BaseURLController$1(context).getInstance(),
             errHandler: errHandler,
             timelineConverter: TimelineConverter$1(context).getInstance()
@@ -28068,7 +28306,7 @@ function MediaPlayer() {
     }
 
     function createManifestLoader() {
-        return factory$22(context).create({
+        return factory$26(context).create({
             errHandler: errHandler,
             parser: createManifestParser(),
             metricsModel: metricsModel,
@@ -30364,8 +30602,8 @@ function MetricsReporting() {
 }
 
 MetricsReporting.__dashjs_factory_name = 'MetricsReporting';
-var factory$26 = FactoryMaker.getClassFactory(MetricsReporting);
-factory$26.events = metricsReportingEvents;
+var factory$30 = FactoryMaker.getClassFactory(MetricsReporting);
+factory$30.events = metricsReportingEvents;
 
 function MediaPlayerFactory() {
 
@@ -30461,17 +30699,30 @@ function MediaPlayerFactory() {
 }
 
 var instance = MediaPlayerFactory();
+var loadInterval = void 0;
 
 function loadHandler() {
     window.removeEventListener('load', loadHandler);
     instance.createAll();
 }
 
+function loadIntervalHandler() {
+    if (window.dashjs) {
+        window.clearInterval(loadInterval);
+        instance.createAll();
+    }
+}
+
 var avoidAutoCreate = typeof window !== 'undefined' && window && window.dashjs && window.dashjs.skipAutoCreate;
 
-if (!avoidAutoCreate && typeof window !== 'undefined' && window && window.dashjs && window.addEventListener) {
+if (!avoidAutoCreate && typeof window !== 'undefined' && window && window.addEventListener) {
     if (window.document.readyState === 'complete') {
-        instance.createAll();
+        if (window.dashjs) {
+            instance.createAll();
+        } else {
+            // If loaded asynchronously, window.readyState may be 'complete' even if dashjs hasn't loaded yet
+            loadInterval = window.setInterval(loadIntervalHandler, 500);
+        }
     } else {
         window.addEventListener('load', loadHandler);
     }
@@ -30519,11 +30770,158 @@ if (!dashjs$1) {
 
 dashjs$1.MediaPlayer = factory;
 // dashjs.Protection = Protection;
-dashjs$1.MetricsReporting = factory$26;
+dashjs$1.MetricsReporting = factory$30;
 dashjs$1.MediaPlayerFactory = instance;
 dashjs$1.Version = getVersionString();
 
 var dashjs$2 = dashjs$1;
+
+function checkRange(number, min, max) {
+    if (number < min) {
+        return false;
+    }
+    if (number > max) {
+        return false;
+    }
+    return true;
+}
+
+function setDashOptions(name, dashjs) {
+    var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
+    if (!dashjs) {
+        throw new Error('Dashjs instance is required.');
+    }
+
+    var abandonLoadTimeout = options.abandonLoadTimeout,
+        bandwidthSafetyFactor = options.bandwidthSafetyFactor,
+        bufferPruningInterval = options.bufferPruningInterval,
+        bufferTimeAtTopQuality = options.bufferTimeAtTopQuality,
+        bufferTimeAtTopQualityLongForm = options.bufferTimeAtTopQualityLongForm,
+        bufferToKeep = options.bufferToKeep,
+        fastSwitchEnabled = options.fastSwitchEnabled,
+        fragmentLoaderRetryAttempts = options.fragmentLoaderRetryAttempts,
+        fragmentLoaderRetryInterval = options.fragmentLoaderRetryInterval,
+        liveDelay = options.liveDelay,
+        liveDelayFragmentCount = options.liveDelayFragmentCount,
+        longFormContentDurationThreshold = options.longFormContentDurationThreshold,
+        richBufferThreshold = options.richBufferThreshold,
+        stableBufferTime = options.stableBufferTime,
+        useSuggestedPresentationDelay = options.useSuggestedPresentationDelay;
+
+
+    if (Number.isFinite(abandonLoadTimeout)) {
+        if (abandonLoadTimeout > 0) {
+            dashjs.setAbandonLoadTimeout(abandonLoadTimeout);
+        } else {
+            console.error(name + ': incorrect abandonLoadTimeout. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(bandwidthSafetyFactor)) {
+        if (checkRange(bandwidthSafetyFactor, 0, 1)) {
+            dashjs.setBandwidthSafetyFactor(bandwidthSafetyFactor);
+        } else {
+            console.error(name + ': incorrect bandwidthSafetyFactor. Please use a percentage between 0.0 and 1.');
+        }
+    }
+
+    if (Number.isFinite(bufferPruningInterval)) {
+        if (bufferPruningInterval > 0) {
+            dashjs.setBufferPruningInterval(bufferPruningInterval);
+        } else {
+            console.error(name + ': incorrect bufferPruningInterval. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(bufferTimeAtTopQuality)) {
+        if (bufferTimeAtTopQuality > 0) {
+            dashjs.setBufferTimeAtTopQuality(bufferTimeAtTopQuality);
+        } else {
+            console.error(name + ': incorrect bufferTimeAtTopQuality. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(bufferTimeAtTopQualityLongForm)) {
+        if (bufferTimeAtTopQualityLongForm > 0) {
+            dashjs.setBufferTimeAtTopQualityLongForm(bufferTimeAtTopQualityLongForm);
+        } else {
+            console.error(name + ': incorrect bufferTimeAtTopQualityLongForm. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(bufferToKeep)) {
+        if (bufferToKeep > 0) {
+            dashjs.setBufferToKeep(bufferToKeep);
+        } else {
+            console.error(name + ': incorrect bufferToKeep. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (fastSwitchEnabled) {
+        dashjs.setFastSwitchEnabled(!!fastSwitchEnabled);
+    }
+
+    if (Number.isFinite(fragmentLoaderRetryAttempts)) {
+        if (fragmentLoaderRetryAttempts > 0) {
+            dashjs.setFragmentLoaderRetryAttempts(fragmentLoaderRetryAttempts);
+        } else {
+            console.error(name + ': incorrect fragmentLoaderRetryAttempts. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(fragmentLoaderRetryInterval)) {
+        if (fragmentLoaderRetryInterval > 0) {
+            dashjs.setFragmentLoaderRetryInterval(fragmentLoaderRetryInterval);
+        } else {
+            console.error(name + ': incorrect fragmentLoaderRetryInterval. Please use a number in milliseconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(liveDelay)) {
+        if (liveDelay > 0) {
+            dashjs.setLiveDelay(liveDelay);
+        } else {
+            console.error(name + ': incorrect liveDelay. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(liveDelayFragmentCount)) {
+        if (liveDelayFragmentCount > 0) {
+            dashjs.setLiveDelayFragmentCount(liveDelayFragmentCount);
+        } else {
+            console.error(name + ': incorrect liveDelayFragmentCount. Please use a number higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(longFormContentDurationThreshold)) {
+        if (longFormContentDurationThreshold > 0) {
+            dashjs.setLongFormContentDurationThreshold(longFormContentDurationThreshold);
+        } else {
+            console.error(name + ': incorrect longFormContentDurationThreshold. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(richBufferThreshold)) {
+        if (richBufferThreshold > 0) {
+            dashjs.setRichBufferThreshold(richBufferThreshold);
+        } else {
+            console.error(name + ': incorrect richBufferThreshold. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (Number.isFinite(stableBufferTime)) {
+        if (stableBufferTime > 0) {
+            dashjs.setStableBufferTime(stableBufferTime);
+        } else {
+            console.error(name + ': incorrect stableBufferTime. Please use a number in seconds higher than 0.');
+        }
+    }
+
+    if (useSuggestedPresentationDelay) {
+        dashjs.useSuggestedPresentationDelay(!!useSuggestedPresentationDelay);
+    }
+}
 
 var Dash$1 = function (_Meister$MediaPlugin) {
     inherits(Dash, _Meister$MediaPlugin);
@@ -30627,6 +31025,11 @@ var Dash$1 = function (_Meister$MediaPlugin) {
                     _this4.dash.setBufferTimeAtTopQuality(10);
                     _this4.dash.setBufferTimeAtTopQualityLongForm(10);
                     _this4.dash.setBufferToKeep(10);
+                }
+
+                // override settings with user based settings.
+                if (_this4.config.settings) {
+                    setDashOptions(_this4.name, _this4.dash, _this4.config.settings);
                 }
 
                 _this4.on('requestGoLive', _this4.goLive.bind(_this4));

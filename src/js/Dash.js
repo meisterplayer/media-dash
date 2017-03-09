@@ -1,4 +1,5 @@
 import dashjs from 'dashjs';
+import { setDashOptions } from './helpers/setDashOptions';
 
 class Dash extends Meister.MediaPlugin {
     constructor(config, meister) {
@@ -93,6 +94,11 @@ class Dash extends Meister.MediaPlugin {
                 this.dash.setBufferTimeAtTopQuality(10);
                 this.dash.setBufferTimeAtTopQualityLongForm(10);
                 this.dash.setBufferToKeep(10);
+            }
+
+            // override settings with user based settings.
+            if (this.config.settings) {
+                setDashOptions(this.name, this.dash, this.config.settings);
             }
 
             this.on('requestGoLive', this.goLive.bind(this));
