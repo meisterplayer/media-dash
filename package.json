@@ -17,7 +17,8 @@
     "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#triple_2.4.1"
   },
   "devDependencies": {
-    "@npm-wearetriple/js-dev": "^2.3.3",
+    "@npm-wearetriple/gulp-rollup-tasks": "^1.0.0",
+    "@npm-wearetriple/js-dev": "^3.1.0",
     "gulp": "^3.9.1"
   }
 }
