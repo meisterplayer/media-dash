@@ -1,21 +1,31 @@
 const gulp = require('gulp');
-const tripleGulp = require('@npm-wearetriple/js-dev').gulp;
-const rollupGulp = require('@npm-wearetriple/gulp-rollup-tasks');
+const tripleGulp = require('meister-js-dev').gulp;
+const webpackTask = require('meister-gulp-webpack-tasks');
 
 // Building tasks.
 const MODULE_NAME = 'Dash';
 
-const rollupConfig = rollupGulp.createRollupConfig('index.js');
-const bundleConfig = rollupGulp.createBundleConfig(`./build/${MODULE_NAME}.js`);
-gulp.task('build', rollupGulp.createRollupBundler(rollupConfig, bundleConfig));
+gulp.task('build', (done) => {
+    const bundleConfig = webpackTask.createConfig('./index.js', `build/${MODULE_NAME}.js`, false);
+    const bundleCompiler = webpackTask.createCompiler(bundleConfig);
 
-const rollupConfigDist = rollupGulp.createRollupConfig('index.js');
-const bundleConfigDist = rollupGulp.createBundleConfig(`./dist/${MODULE_NAME}.js`);
-gulp.task('build:dist', rollupGulp.createRollupBundler(rollupConfigDist, bundleConfigDist));
+    webpackTask.createBuildTask(bundleCompiler)(done);
+});
 
-const rollupConfigMin = rollupGulp.createRollupConfig('index.js', true);
-const bundleConfigMin = rollupGulp.createBundleConfig(`./dist/${MODULE_NAME}.min.js`, false, MODULE_NAME, 'umd');
-gulp.task('build:min', rollupGulp.createRollupBundler(rollupConfigMin, bundleConfigMin));
+gulp.task('build:dist', (done) => {
+    const bundleConfigDist = webpackTask.createConfig('./index.js', `dist/${MODULE_NAME}.js`, false);
+    const bundleCompilerDist = webpackTask.createCompiler(bundleConfigDist);
+
+    webpackTask.createBuildTask(bundleCompilerDist)(done);
+});
+
+gulp.task('build:min', (done) => {
+    const bundleConfigMin = webpackTask.createConfig('./index.js', `dist/${MODULE_NAME}.min.js`, true);
+    const bundleCompilerMin = webpackTask.createCompiler(bundleConfigMin);
+
+    webpackTask.createBuildTask(bundleCompilerMin)(done);
+});
+
 
 // Documentation tasks.
 gulp.task('js-docs', tripleGulp.jsdocModule.createGenerateDocs(['./src/**/*.js'], './docs/js-docs'));

@@ -343,4 +343,6 @@ class Dash extends Meister.MediaPlugin {
 }
 
 Meister.registerPlugin(Dash.pluginName, Dash);
+Meister.registerPlugin('dash', Dash);
+
 export default Dash;
