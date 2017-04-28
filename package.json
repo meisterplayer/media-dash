@@ -1,5 +1,5 @@
 {
-  "name": "meister-plugin-dash",
+  "name": "@meisterplayer/plugin-dash",
   "version": "5.0.1",
   "description": "Meister plugin wrapping the dashjs player.",
   "main": "dist/Dash.js",
