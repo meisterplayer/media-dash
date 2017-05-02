@@ -129,10 +129,7 @@ class Dash extends Meister.MediaPlugin {
 
             // Handle autplay
             this.one('requestPlay', () => {
-                // HACK: workaround for promise-error message on Chrome (which has no side-effects but is ugly) .. BUG is actually in Chrome, but we might want to take a look at this
-                setTimeout(() => {
-                    this.dash.play();
-                }, 0);
+                this.dash.play();
             });
 
             resolve();
