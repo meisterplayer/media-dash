@@ -110,6 +110,7 @@ class Dash extends Meister.MediaPlugin {
             this.dash.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, this.onManifestLoaded.bind(this)); //eslint-disable-line
             this.dash.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, this.onStreamInitialized.bind(this)); //eslint-disable-line
             this.dash.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, this.onQualityChanged.bind(this)); //eslint-disable-line
+            this.dash.on(dashjs.MediaPlayer.events.ERROR, this.onError.bind(this)); //eslint-disable-line
 
             this.dash.on(dashjs.MediaPlayer.events.METRIC_ADDED, (e) => { //eslint-disable-line
                 if (e.metric === 'HttpList' && e.value.type === 'MPD' && !this.gotFirstManifest) {
@@ -165,6 +166,14 @@ class Dash extends Meister.MediaPlugin {
             currentTime,
             duration,
         });
+    }
+
+    onError(event) {
+        if (event.error === 'download') {
+            // Make sure we are paused when we throw an error from a fragment.
+            this.meister.error('Could not download fragment after retry\'s', 'DSH-0001');
+            this.meister.pause();
+        }
     }
 
     onManifestLoaded(manifestEvent) {
