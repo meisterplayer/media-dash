@@ -77,6 +77,9 @@ class Dash extends Meister.MediaPlugin {
 
     load(item) {
         super.load(item);
+
+        item.startFromBeginning = true;
+
         return new Promise((resolve) => {
             this.dash = dashjs.MediaPlayer().create(); //eslint-disable-line
             // disable the debug messages
@@ -101,6 +104,13 @@ class Dash extends Meister.MediaPlugin {
                 setDashOptions(this.name, this.dash, this.config.settings);
             }
 
+            // Items options alway overrule the config settings
+            if (item.startFromLive) {
+
+                // This puts the delay as close to the edge as possible.
+                this.dash.setLiveDelayFragmentCount(0);
+            }
+
             this.on('requestGoLive', this.goLive.bind(this));
             this.on('requestSeek', this.onRequestSeek.bind(this));
             this.on('_playerTimeUpdate', this._onPlayerTimeUpdate.bind(this));
@@ -119,6 +129,18 @@ class Dash extends Meister.MediaPlugin {
                         code: 'VIDEO_ACQUIRING_MANIFEST',
                     });
                 }
+            });
+
+            this.didBeginSeek = false;
+
+            // this.meister.playerPlugin.mediaElement.addEventListener
+            this.on('playerLoadedMetadata', () => {
+                if (!item.startFromBeginning || this.didBeginSeek) return;
+
+                this.didBeginSeek = true;
+                this.meister.trigger('requestSeek', {
+                    relativePosition: 0,
+                });
             });
 
             this.dash.initialize(this.player.mediaElement, item.src, false);
