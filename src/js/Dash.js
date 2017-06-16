@@ -115,9 +115,6 @@ class Dash extends Meister.MediaPlugin {
             }
 
             this.on('requestGoLive', this.goLive.bind(this));
-            this.on('requestSeek', this.onRequestSeek.bind(this));
-            this.on('_playerTimeUpdate', this._onPlayerTimeUpdate.bind(this));
-            this.on('_playerSeek', this._onPlayerSeek.bind(this));
             this.on('requestBitrate', this.onRequestBitrate.bind(this));
 
             this.dash.on(dashjs.MediaPlayer.events.MANIFEST_LOADED, this.onManifestLoaded.bind(this)); //eslint-disable-line
@@ -160,6 +157,24 @@ class Dash extends Meister.MediaPlugin {
 
             resolve();
         });
+    }
+
+    get duration() {
+        if (!this.dash) { return NaN; }
+
+        return this.dash.duration();
+    }
+
+    get currentTime() {
+        if (!this.dash) { return NaN; }
+
+        return this.dash.time();
+    }
+
+    set currentTime(time) {
+        if (!this.dash) { return; }
+
+        this.dash.seek(time);
     }
 
     unload() {
@@ -369,7 +384,7 @@ class Dash extends Meister.MediaPlugin {
         const duration = this.dash.duration();
         const liveTime = duration - 30;
 
-        this.meister.currentTime = this.dash.getDVRSeekOffset(liveTime);
+        this.player.currentTime = this.dash.getDVRSeekOffset(liveTime);
     }
 }
 
