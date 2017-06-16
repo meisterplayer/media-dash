@@ -1,7 +1,3 @@
-# License
-
-I guess we need a different license for this since we're using dashjs.
-
 # Dash Plugin #
 
 A plugin for the Meister.js video player that allows playback of DASH streams.
@@ -66,3 +62,32 @@ Options are required unless marked as [optional]. For more detailed information 
         See [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html#setStableBufferTime__anchor).
     * [optional] **useSuggestedPresentationDelay** :: *Boolean*  
         See [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html#useSuggestedPresentationDelay__anchor).
+
+Item options
+------------
+
+The following options can be added per item
+
+### startFromLive *[Boolean]* (default: false) ###
+
+Start from the live edge this will bring the player as close as possible to the live edge.
+
+``` JavaScript
+meisterPlayer.setItem({
+    src: 'https://example.com/secure/stream/manifest.mpd',
+    startFromLive: true,
+    type: 'mpd'
+});
+```
+
+### startFromBeginning *[Boolean]* (default: false) ###
+
+Start from the beginning of the live stream. (VOD streams will always begin from the beginning).
+
+``` JavaScript
+meisterPlayer.setItem({
+    src: 'https://example.com/secure/stream/manifest.mpd',
+    startFromBeginning: true,
+    type: 'mpd'
+});
+```
