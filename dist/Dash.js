@@ -35284,6 +35284,9 @@ var Dash = function (_Meister$MediaPlugin) {
             var _this4 = this;
 
             _get(Dash.prototype.__proto__ || Object.getPrototypeOf(Dash.prototype), 'load', this).call(this, item);
+
+            item.startFromBeginning = true;
+
             return new Promise(function (resolve) {
                 _this4.dash = _dashjs2.default.MediaPlayer().create(); //eslint-disable-line
                 // disable the debug messages
@@ -35308,6 +35311,13 @@ var Dash = function (_Meister$MediaPlugin) {
                     (0, _setDashOptions.setDashOptions)(_this4.name, _this4.dash, _this4.config.settings);
                 }
 
+                // Items options alway overrule the config settings
+                if (item.startFromLive) {
+
+                    // This puts the delay as close to the edge as possible.
+                    _this4.dash.setLiveDelayFragmentCount(0);
+                }
+
                 _this4.on('requestGoLive', _this4.goLive.bind(_this4));
                 _this4.on('requestSeek', _this4.onRequestSeek.bind(_this4));
                 _this4.on('_playerTimeUpdate', _this4._onPlayerTimeUpdate.bind(_this4));
@@ -35317,6 +35327,7 @@ var Dash = function (_Meister$MediaPlugin) {
                 _this4.dash.on(_dashjs2.default.MediaPlayer.events.MANIFEST_LOADED, _this4.onManifestLoaded.bind(_this4)); //eslint-disable-line
                 _this4.dash.on(_dashjs2.default.MediaPlayer.events.STREAM_INITIALIZED, _this4.onStreamInitialized.bind(_this4)); //eslint-disable-line
                 _this4.dash.on(_dashjs2.default.MediaPlayer.events.QUALITY_CHANGE_RENDERED, _this4.onQualityChanged.bind(_this4)); //eslint-disable-line
+                _this4.dash.on(_dashjs2.default.MediaPlayer.events.ERROR, _this4.onError.bind(_this4)); //eslint-disable-line
 
                 _this4.dash.on(_dashjs2.default.MediaPlayer.events.METRIC_ADDED, function (e) {
                     //eslint-disable-line
@@ -35328,6 +35339,18 @@ var Dash = function (_Meister$MediaPlugin) {
                     }
                 });
 
+                _this4.didBeginSeek = false;
+
+                // this.meister.playerPlugin.mediaElement.addEventListener
+                _this4.on('playerLoadedMetadata', function () {
+                    if (!item.startFromBeginning || _this4.didBeginSeek) return;
+
+                    _this4.didBeginSeek = true;
+                    _this4.meister.trigger('requestSeek', {
+                        relativePosition: 0
+                    });
+                });
+
                 _this4.dash.initialize(_this4.player.mediaElement, item.src, false);
 
                 _this4.one('playerPlay', function () {
@@ -35337,10 +35360,7 @@ var Dash = function (_Meister$MediaPlugin) {
 
                 // Handle autplay
                 _this4.one('requestPlay', function () {
-                    // HACK: workaround for promise-error message on Chrome (which has no side-effects but is ugly) .. BUG is actually in Chrome, but we might want to take a look at this
-                    setTimeout(function () {
-                        _this4.dash.play();
-                    }, 0);
+                    _this4.dash.play();
                 });
 
                 resolve();
@@ -35379,6 +35399,15 @@ var Dash = function (_Meister$MediaPlugin) {
                 currentTime: currentTime,
                 duration: duration
             });
+        }
+    }, {
+        key: 'onError',
+        value: function onError(event) {
+            if (event.error === 'download') {
+                // Make sure we are paused when we throw an error from a fragment.
+                this.meister.error('Could not download fragment after retry\'s', 'DSH-0001');
+                this.meister.pause();
+            }
         }
     }, {
         key: 'onManifestLoaded',
