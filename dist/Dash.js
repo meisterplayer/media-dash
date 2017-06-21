@@ -35285,8 +35285,6 @@ var Dash = function (_Meister$MediaPlugin) {
 
             _get(Dash.prototype.__proto__ || Object.getPrototypeOf(Dash.prototype), 'load', this).call(this, item);
 
-            item.startFromBeginning = true;
-
             return new Promise(function (resolve) {
                 _this4.dash = _dashjs2.default.MediaPlayer().create(); //eslint-disable-line
                 // disable the debug messages
