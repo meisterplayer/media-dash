@@ -78,8 +78,6 @@ class Dash extends Meister.MediaPlugin {
     load(item) {
         super.load(item);
 
-        item.startFromBeginning = true;
-
         return new Promise((resolve) => {
             this.dash = dashjs.MediaPlayer().create(); //eslint-disable-line
             // disable the debug messages
