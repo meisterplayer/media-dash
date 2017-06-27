@@ -1,5 +1,6 @@
 import dashjs from 'dashjs';
 import { setDashOptions } from './helpers/setDashOptions';
+import packageJson from '../../package.json';
 
 class Dash extends Meister.MediaPlugin {
     constructor(config, meister) {
@@ -14,6 +15,10 @@ class Dash extends Meister.MediaPlugin {
 
     static get pluginName() {
         return 'Dash';
+    }
+
+    static get pluginVersion() {
+        return packageJson.version;
     }
 
     isItemSupported(item) {
