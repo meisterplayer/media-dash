@@ -1,3 +1,13 @@
+<a name="5.2.0"></a>
+# [5.2.0](https://github.com/meisterplayer/media-dash/compare/v5.1.1...v5.2.0) (2017-06-27)
+
+
+### Features
+
+* **pluginVersion:** Add pluginVersion to class ([9dd58d3](https://github.com/meisterplayer/media-dash/commit/9dd58d3))
+
+
+
 <a name="5.1.1"></a>
 ## [5.1.1](https://github.com/meisterplayer/media-dash/compare/v5.1.0...v5.1.1) (2017-06-21)
 
