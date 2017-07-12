@@ -134,11 +134,12 @@ class Dash extends Meister.MediaPlugin {
             this.didBeginSeek = false;
 
             // this.meister.playerPlugin.mediaElement.addEventListener
-            this.on('playerLoadedMetadata', () => {
+            this.on('playerCanPlay', () => {
                 if (!item.startFromBeginning || this.didBeginSeek) return;
 
                 this.didBeginSeek = true;
-                this.meister.trigger('requestSeek', {
+
+                this.onRequestSeek({
                     relativePosition: 0,
                 });
             });
