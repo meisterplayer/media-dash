@@ -35321,9 +35321,6 @@ var Dash = function (_Meister$MediaPlugin) {
                 }
 
                 _this4.on('requestGoLive', _this4.goLive.bind(_this4));
-                _this4.on('requestSeek', _this4.onRequestSeek.bind(_this4));
-                _this4.on('_playerTimeUpdate', _this4._onPlayerTimeUpdate.bind(_this4));
-                _this4.on('_playerSeek', _this4._onPlayerSeek.bind(_this4));
                 _this4.on('requestBitrate', _this4.onRequestBitrate.bind(_this4));
 
                 _this4.dash.on(_dashjs2.default.MediaPlayer.events.MANIFEST_LOADED, _this4.onManifestLoaded.bind(_this4)); //eslint-disable-line
@@ -35611,7 +35608,32 @@ var Dash = function (_Meister$MediaPlugin) {
             var duration = this.dash.duration();
             var liveTime = duration - 30;
 
-            this.meister.currentTime = this.dash.getDVRSeekOffset(liveTime);
+            this.player.currentTime = this.dash.getDVRSeekOffset(liveTime);
+        }
+    }, {
+        key: 'duration',
+        get: function get() {
+            if (!this.dash) {
+                return NaN;
+            }
+
+            return this.dash.duration();
+        }
+    }, {
+        key: 'currentTime',
+        get: function get() {
+            if (!this.dash) {
+                return NaN;
+            }
+
+            return this.dash.time();
+        },
+        set: function set(time) {
+            if (!this.dash) {
+                return;
+            }
+
+            this.dash.seek(time);
         }
     }], [{
         key: 'pluginName',
@@ -35799,7 +35821,7 @@ exports.default = setDashOptions;
 
 module.exports = {
 	"name": "@meisterplayer/plugin-dash",
-	"version": "5.2.0",
+	"version": "5.3.0",
 	"description": "Meister plugin wrapping the dashjs player.",
 	"main": "dist/Dash.js",
 	"keywords": [
@@ -35822,6 +35844,9 @@ module.exports = {
 		"babel-preset-es2015": "^6.24.0",
 		"babel-preset-es2017": "^6.22.0",
 		"gulp": "^3.9.1"
+	},
+	"peerDependencies": {
+		"@meisterplayer/meisterplayer": ">= 5.1.0"
 	}
 };
 
