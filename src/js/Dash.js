@@ -30,14 +30,14 @@ class Dash extends Meister.MediaPlugin {
     isItemSupported(item) {
         return new Promise((resolve) => {
             if (!SUPPORTED_TYPES.includes(item.type)) {
-                return resolve({
+                resolve({
                     supported: false,
                     errorCode: Meister.ErrorCodes.WRONG_TYPE,
                 });
             }
 
             if (!window.MediaSource) {
-                return resolve({
+                resolve({
                     supported: false,
                     errorCode: Meister.ErrorCodes.NOT_SUPPORTED,
                 });
@@ -59,7 +59,7 @@ class Dash extends Meister.MediaPlugin {
                         }
                     });
 
-                    return resolve({
+                    resolve({
                         supported,
                         errorCode: supported ? null : Meister.ErrorCodes.NO_DRM,
                     });
@@ -67,7 +67,7 @@ class Dash extends Meister.MediaPlugin {
 
                 this.meister.trigger('requestDrmKeySystemSupport', {});
             } else {
-                return resolve({
+                resolve({
                     supported: true,
                 });
             }
@@ -338,7 +338,7 @@ class Dash extends Meister.MediaPlugin {
         const bitrateIndex = e.newQuality;
         const bitrates = this.dash.getBitrateInfoListFor('video');
 
-        const newBitrate = bitrates.find((item) => item.qualityIndex === bitrateIndex);
+        const newBitrate = bitrates.find(item => item.qualityIndex === bitrateIndex);
 
         this.meister.trigger('playerAutoSwitchBitrate', {
             newBitrate: newBitrate.bitrate,
