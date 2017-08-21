@@ -139,8 +139,14 @@ class Dash extends Meister.MediaPlugin {
 
                 this.didBeginSeek = true;
 
+                let relativePosition = 0;
+
+                if (typeof item.startFromBeginning === 'object') {
+                    relativePosition = item.startFromBeginning.offset / this.dash.duration();
+                }
+
                 this.onRequestSeek({
-                    relativePosition: 0,
+                    relativePosition,
                 });
             });
 

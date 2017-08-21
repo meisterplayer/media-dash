@@ -80,7 +80,7 @@ meisterPlayer.setItem({
 });
 ```
 
-### startFromBeginning *[Boolean]* (default: false) ###
+### startFromBeginning *[Boolean|Object]* (default: false) ###
 
 Start from the beginning of the live stream. (VOD streams will always begin from the beginning).
 
@@ -88,6 +88,18 @@ Start from the beginning of the live stream. (VOD streams will always begin from
 meisterPlayer.setItem({
     src: 'https://example.com/secure/stream/manifest.mpd',
     startFromBeginning: true,
+    type: 'mpd'
+});
+```
+
+Or you can give an object with an offset to start from a offset
+
+``` JavaScript
+meisterPlayer.setItem({
+    src: 'https://example.com/secure/stream/manifest.mpd',
+    startFromBeginning: {
+        offset: 10, // Start from the "beginning" with an offset of 10 seconds
+    },
     type: 'mpd'
 });
 ```
