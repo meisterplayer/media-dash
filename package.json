@@ -15,7 +15,7 @@
   "author": "Triple",
   "license": "Apache-2.0",
   "dependencies": {
-    "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#triple_2.4.1"
+    "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#triple_2.6.0"
   },
   "devDependencies": {
     "meister-gulp-webpack-tasks": "^1.0.6",
@@ -25,6 +25,6 @@
     "gulp": "^3.9.1"
   },
   "peerDependencies": {
-      "@meisterplayer/meisterplayer": ">= 5.1.0"
+    "@meisterplayer/meisterplayer": ">= 5.1.0"
   }
 }

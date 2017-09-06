@@ -6,6 +6,8 @@ class Dash extends Meister.MediaPlugin {
     constructor(config, meister) {
         super(config, meister);
 
+        this.config.debug = true;
+
         this.dash = null;
         this.foundBitrates = false;
         this.gotFirstManifest = false;
@@ -86,7 +88,7 @@ class Dash extends Meister.MediaPlugin {
         return new Promise((resolve) => {
             this.dash = dashjs.MediaPlayer().create(); //eslint-disable-line
             // disable the debug messages
-            this.dash.getDebug().setLogToBrowserConsole(false);
+            this.dash.getDebug().setLogToBrowserConsole(this.config.debug || false);
 
             // When enabled, after an ABR up-switch in quality
             this.dash.setFastSwitchEnabled(true);
