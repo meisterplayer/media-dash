@@ -6,8 +6,6 @@ class Dash extends Meister.MediaPlugin {
     constructor(config, meister) {
         super(config, meister);
 
-        this.config.debug = true;
-
         this.dash = null;
         this.foundBitrates = false;
         this.gotFirstManifest = false;
@@ -86,7 +84,7 @@ class Dash extends Meister.MediaPlugin {
         super.load(item);
 
         return new Promise((resolve) => {
-            this.dash = dashjs.MediaPlayer().create(); //eslint-disable-line
+            this.dash = dashjs.MediaPlayer().create();
             // disable the debug messages
             this.dash.getDebug().setLogToBrowserConsole(this.config.debug || false);
 
@@ -111,7 +109,6 @@ class Dash extends Meister.MediaPlugin {
 
             // Items options alway overrule the config settings
             if (item.startFromLive) {
-
                 // This puts the delay as close to the edge as possible.
                 this.dash.setLiveDelayFragmentCount(0);
             }
@@ -135,7 +132,6 @@ class Dash extends Meister.MediaPlugin {
 
             this.didBeginSeek = false;
 
-            // this.meister.playerPlugin.mediaElement.addEventListener
             this.on('playerCanPlay', () => {
                 if (!item.startFromBeginning || this.didBeginSeek) return;
 
