@@ -2,6 +2,8 @@ import dashjs from 'dashjs';
 import { setDashOptions } from './helpers/setDashOptions';
 import packageJson from '../../package.json';
 
+const SUPPORTED_TYPES = ['dash', 'mpd'];
+
 class Dash extends Meister.MediaPlugin {
     constructor(config, meister) {
         super(config, meister);
@@ -11,6 +13,10 @@ class Dash extends Meister.MediaPlugin {
         this.gotFirstManifest = false;
         this.drmSupportList = [];
         this.hasDrmSupportList = false;
+
+        if (this.config.enableSmooth) {
+            SUPPORTED_TYPES.push('smooth', 'mss');
+        }
     }
 
     static get pluginName() {
@@ -23,7 +29,7 @@ class Dash extends Meister.MediaPlugin {
 
     isItemSupported(item) {
         return new Promise((resolve) => {
-            if (item.type !== 'dash' && item.type !== 'mpd') {
+            if (!SUPPORTED_TYPES.includes(item.type)) {
                 return resolve({
                     supported: false,
                     errorCode: Meister.ErrorCodes.WRONG_TYPE,
