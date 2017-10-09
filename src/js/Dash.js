@@ -260,7 +260,6 @@ class Dash extends Meister.MediaPlugin {
 
         // Retrieve then KID from the manifestEvent.
         const adaptationSet = manifestEvent.data.Period.AdaptationSet;
-        let kid = null;
         let contentProtection = null;
 
         // Make sure we got an AdaptationSet
@@ -274,27 +273,21 @@ class Dash extends Meister.MediaPlugin {
         }
 
         // Search for the default KID.
-        for (let i = 0; i < contentProtection.length; i++) {
-            const protection = contentProtection[i];
-
-            if (!protection['cenc:default_KID']) continue; //eslint-disable-line
-
-            kid = protection['cenc:default_KID'];
-        }
+        const defaultKidProtetionInfo = contentProtection.find(protectionInfo => !!protectionInfo['cenc:default_KID']);
+        const kid = defaultKidProtetionInfo['cenc:default_KID'];
 
         if (kid) {
             this.meister.trigger('drmKidAvailable', kid);
         }
 
         if (!this.hasDrmSupportList) {
-            for (const protection of contentProtection) {
-                // Is the scheme Widevine?
-                if (protection.schemeIdUri === 'urn:uuid:EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED') {
+            contentProtection.forEach((protectionInfo) => {
+                if (protectionInfo.schemeIdUri === 'urn:uuid:EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED') {
                     this.drmSupportList.push('com.widevine.alpha');
-                } else if (protection.schemeIdUri === 'urn:uuid:9A04F079-9840-4286-AB92-E65BE0885F95') {
+                } else if (protectionInfo.schemeIdUri === 'urn:uuid:9A04F079-9840-4286-AB92-E65BE0885F95') {
                     this.drmSupportList.push('com.microsoft.playready');
                 }
-            }
+            });
         }
 
         if (this.drmSupportList.length && !this.hasDrmSupportList) {
@@ -307,22 +300,17 @@ class Dash extends Meister.MediaPlugin {
         // No need to rebroadcast bitrates.
         if (this.foundBitrates) return;
 
-        const dashBitrates = this.dash.getBitrateInfoListFor('video');
-        const bitrates = [];
+        const bitratesList = this.dash.getBitrateInfoListFor('video');
+        const bitrates = bitratesList.map(bitrateInfo => ({
+            bitrate: bitrateInfo.bitrate,
+            index: bitrateInfo.qualityIndex,
+        }));
 
         // Bitrate 0 means auto quality.
-        bitrates.push({
+        bitrates.unshift({
             bitrate: 0,
             index: -1,
         });
-
-        for (let i = 0; i < dashBitrates.length; i++) {
-            const bitrate = dashBitrates[i];
-            bitrates.push({
-                bitrate: bitrate.bitrate,
-                index: bitrate.qualityIndex,
-            });
-        }
 
         this.meister.trigger('itemBitrates', {
             bitrates,
@@ -357,17 +345,11 @@ class Dash extends Meister.MediaPlugin {
         this.dash.setAutoSwitchQualityFor('video', false);
         this.dash.setQualityFor('video', e.bitrateIndex);
 
-        let newBitrate = 0;
-        const bitrates = this.dash.getBitrateInfoListFor('video');
-        for (let i = 0; i < bitrates.length; i++) {
-            if (e.bitrateIndex === bitrates[i].qualityIndex) {
-                newBitrate = bitrates[i].bitrate;
-                break;
-            }
-        }
+        const bitratesList = this.dash.getBitrateInfoListFor('video');
+        const newBitrateInfo = bitratesList.find(bitrateInfo => e.qualityIndex === bitrateInfo.qualityIndex);
 
         this.meister.trigger('playerSwitchBitrate', {
-            newBitrate,
+            newBitrate: newBitrateInfo.bitrate,
             newBitrateIndex: e.bitrateIndex,
         });
     }
