@@ -1,6 +1,7 @@
 import dashjs from 'dashjs';
 import { setDashOptions } from './helpers/setDashOptions';
 import packageJson from '../../package.json';
+import localization from './localization';
 
 const SUPPORTED_TYPES = ['dash', 'mpd'];
 
@@ -13,6 +14,9 @@ class Dash extends Meister.MediaPlugin {
         this.gotFirstManifest = false;
         this.drmSupportList = [];
         this.hasDrmSupportList = false;
+
+        // Add all our localization to the meister localization.
+        meister.Localization.setFromFormattedObject(localization);
 
         if (this.config.enableSmooth) {
             SUPPORTED_TYPES.push('smooth', 'mss');
@@ -222,7 +226,7 @@ class Dash extends Meister.MediaPlugin {
     onError(event) {
         if (event.error === 'download') {
             // Make sure we are paused when we throw an error from a fragment.
-            this.meister.error('Could not download fragment after retry\'s', 'DSH-0001');
+            this.meister.error(this.meister.Localization.get('COULD_NOT_DOWNLOAD_FRAGMENTS'), 'DSH-0001');
             this.meister.pause();
         }
     }
