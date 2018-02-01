@@ -2,6 +2,7 @@ import dashjs from 'dashjs';
 import { setDashOptions } from './helpers/setDashOptions';
 import packageJson from '../../package.json';
 import localization from './localization';
+import extractDrmLicenseInfo from './helpers/extractDrmLicenseInfo';
 
 const SUPPORTED_TYPES = ['dash', 'mpd'];
 
@@ -281,8 +282,12 @@ class Dash extends Meister.MediaPlugin {
         const kid = defaultKidProtetionInfo['cenc:default_KID'];
 
         if (kid) {
+            // @deprecated we should use the drmLicenseInfoAvailable.
             this.meister.trigger('drmKidAvailable', kid);
         }
+
+        const drmLicenseInfo = extractDrmLicenseInfo(contentProtection);
+        this.meister.trigger('drmLicenseInfoAvailable', drmLicenseInfo);
 
         if (!this.hasDrmSupportList) {
             contentProtection.forEach((protectionInfo) => {
