@@ -1,3 +1,13 @@
+<a name="5.7.0"></a>
+# [5.7.0](https://github.com/meisterplayer/media-dash/compare/v5.6.0...v5.7.0) (2018-02-05)
+
+
+### Features
+
+* **dash:** Downgrade back to 2.4.1 due to issues with live content ([a3ecfb2](https://github.com/meisterplayer/media-dash/commit/a3ecfb2))
+
+
+
 <a name="5.6.0"></a>
 # [5.6.0](https://github.com/meisterplayer/media-dash/compare/v5.5.1...v5.6.0) (2018-02-05)
 
