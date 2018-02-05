@@ -24,8 +24,6 @@ var player = new Meister("#querySelector", {
 
 Options are required unless marked as [optional]. For more detailed information on the various dashjs settings please refer to the official dashjs [documentation](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html).
 
-* [optional] **enableSmooth** :: *Boolean*  
-    Enable playback of Smooth streams with this plugin (experimental).
 * [optional] **lowMemoryMode** :: *Boolean*  
     A special preset of settings that allow for smoother playback on lower memory devices. Defaults to false.
 * [optional] **dvrEnabled** :: *Boolean*  
