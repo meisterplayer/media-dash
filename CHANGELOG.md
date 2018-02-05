@@ -1,3 +1,13 @@
+<a name="5.6.0"></a>
+# [5.6.0](https://github.com/meisterplayer/media-dash/compare/v5.5.1...v5.6.0) (2018-02-05)
+
+
+### Features
+
+* **drm:** Extract DRM info from the manifest ([5688a13](https://github.com/meisterplayer/media-dash/commit/5688a13))
+
+
+
 <a name="5.5.1"></a>
 ## [5.5.1](https://github.com/meisterplayer/media-dash/compare/v5.5.0...v5.5.1) (2017-11-30)
 
