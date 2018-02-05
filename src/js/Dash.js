@@ -18,10 +18,6 @@ class Dash extends Meister.MediaPlugin {
 
         // Add all our localization to the meister localization.
         meister.Localization.setFromFormattedObject(localization);
-
-        if (this.config.enableSmooth) {
-            SUPPORTED_TYPES.push('smooth', 'mss');
-        }
     }
 
     static get pluginName() {
