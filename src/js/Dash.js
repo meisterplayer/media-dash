@@ -3,6 +3,7 @@ import { setDashOptions } from './helpers/setDashOptions';
 import packageJson from '../../package.json';
 import localization from './localization';
 import extractDrmLicenseInfo from './helpers/extractDrmLicenseInfo';
+import isAdItem from './services/isAdItem';
 
 const SUPPORTED_TYPES = ['dash', 'mpd'];
 
@@ -155,7 +156,19 @@ class Dash extends Meister.MediaPlugin {
                 });
             });
 
-            this.dash.initialize(this.player.mediaElement, item.src, false);
+            const currentPlaylistItem = this.meister.playlist.list[this.meister.playlist.index];
+
+            // This fixes an issue where GoogleIMA was calling mediaElement.load() on a Dash.js item
+            // to preserve user interactions.
+            // This waits first for the initialUserAction to be completed. so it can then load it all in.
+            // Also this fix only applies to non autoplay devices. (See GoogleIMA trigger)
+            if (isAdItem(currentPlaylistItem) && (this.meister.browser.isMobile || this.meister.browser.isNonAutoPlay)) {
+                this.one('GoogleIma:initialUserActionCompleted', () => {
+                    this.dash.initialize(this.player.mediaElement, item.src, false);
+                });
+            } else {
+                this.dash.initialize(this.player.mediaElement, item.src, false);
+            }
 
             this.one('playerPlay', () => {
                 this.dash.pause();
