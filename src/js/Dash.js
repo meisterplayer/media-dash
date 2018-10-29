@@ -26,7 +26,7 @@ class Dash extends Meister.MediaPlugin {
     }
 
     static get pluginVersion() {
-        return packageJson.version;
+        return `${packageJson.version}-beta`;
     }
 
     isItemSupported(item) {
