@@ -22,7 +22,7 @@
   "author": "Triple",
   "license": "Apache-2.0",
   "dependencies": {
-    "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#triple_2.9.1"
+    "dashjs": "git+https://github.com/meisterplayer/dashjs-fork.git#feature/triple_2.9.2"
   },
   "devDependencies": {
     "@meisterplayer/meister-mock": "^1.0.0",
