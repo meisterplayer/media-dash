@@ -99,9 +99,6 @@ class Dash extends Meister.MediaPlugin {
             // When enabled, after an ABR up-switch in quality
             this.dash.setFastSwitchEnabled(true);
 
-            // Increase default buffer
-            this.dash.setLiveDelayFragmentCount(8);
-
             // Modify buffer pruning behaviour
             if (this.config.lowMemoryMode) {
                 this.dash.setBufferPruningInterval(15);
