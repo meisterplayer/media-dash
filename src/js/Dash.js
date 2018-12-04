@@ -99,6 +99,7 @@ class Dash extends Meister.MediaPlugin {
             // When enabled, after an ABR up-switch in quality
             this.dash.setFastSwitchEnabled(true);
 
+
             // Modify buffer pruning behaviour
             if (this.config.lowMemoryMode) {
                 this.dash.setBufferPruningInterval(15);
@@ -350,7 +351,7 @@ class Dash extends Meister.MediaPlugin {
         this.dash.setQualityFor('video', e.bitrateIndex);
 
         const bitratesList = this.dash.getBitrateInfoListFor('video');
-        const newBitrateInfo = bitratesList.find(bitrateInfo => e.qualityIndex === bitrateInfo.qualityIndex);
+        const newBitrateInfo = bitratesList.find(bitrateInfo => e.bitrateIndex === bitrateInfo.qualityIndex);
 
         this.meister.trigger('playerSwitchBitrate', {
             newBitrate: newBitrateInfo.bitrate,
