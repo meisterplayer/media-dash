@@ -1,3 +1,17 @@
+# Change Log
+
+All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
+
+<a name="5.7.2"></a>
+## [5.7.2](https://github.com/meisterplayer/media-dash/compare/v5.7.1...v5.7.2) (2018-12-17)
+
+
+### Bug Fixes
+
+* **playback:** Remove redundant pause/play call on playerplay ([503d7d4](https://github.com/meisterplayer/media-dash/commit/503d7d4))
+
+
+
 <a name="5.7.1"></a>
 ## [5.7.1](https://github.com/meisterplayer/media-dash/compare/v5.7.0...v5.7.1) (2018-02-07)
 
@@ -102,6 +116,3 @@
 
 * **error:** Throw error when fragment download errors occurs ([aff285f](https://github.com/meisterplayer/media-dash/commit/aff285f))
 * **item:** add startFromLive and startFromBeginning ([9db5769](https://github.com/meisterplayer/media-dash/commit/9db5769))
-
-
-
