@@ -170,11 +170,6 @@ class Dash extends Meister.MediaPlugin {
                 this.dash.initialize(this.player.mediaElement, item.src, false);
             }
 
-            this.one('playerPlay', () => {
-                this.dash.pause();
-                this.dash.play();
-            });
-
             // Handle autplay
             this.one('requestPlay', () => {
                 this.dash.play();
