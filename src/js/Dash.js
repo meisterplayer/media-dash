@@ -388,9 +388,8 @@ class Dash extends Meister.MediaPlugin {
 
     goLive() {
         const duration = this.dash.duration();
-        const liveTime = duration - 30;
 
-        this.player.currentTime = this.dash.getDVRSeekOffset(liveTime);
+        this.player.currentTime = this.dash.getDVRSeekOffset(duration - 1);
     }
 }
 
