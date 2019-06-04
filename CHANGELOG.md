@@ -1,6 +1,15 @@
-# Change Log
+# Changelog
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
+
+### [5.7.3](https://github.com/meisterplayer/media-dash/compare/v5.7.2...v5.7.3) (2019-06-04)
+
+
+### Bug Fixes
+
+* **live:** Remove arbitrary 30 second buffer when seeking to live ([193ef6f](https://github.com/meisterplayer/media-dash/commit/193ef6f))
+
+
 
 <a name="5.7.2"></a>
 ## [5.7.2](https://github.com/meisterplayer/media-dash/compare/v5.7.1...v5.7.2) (2018-12-17)
