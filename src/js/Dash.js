@@ -127,10 +127,28 @@ class Dash extends Meister.MediaPlugin {
             this.dash.on(dashjs.MediaPlayer.events.ERROR, this.onError.bind(this)); //eslint-disable-line
 
             this.dash.on(dashjs.MediaPlayer.events.METRIC_ADDED, (e) => { //eslint-disable-line
-                if (e.metric === 'HttpList' && e.value.type === 'MPD' && !this.gotFirstManifest) {
+                // Listen for the first manifest request in order to update player UI
+                if (!this.gotFirstManifest && e.metric === 'HttpList' && e.value.type === 'MPD') {
                     this.gotFirstManifest = true;
                     this.meister.trigger('showLoading', {
                         code: 'VIDEO_ACQUIRING_MANIFEST',
+                    });
+                // Listen for updates on the available seekrange. This event is fired for dynamic and static streams
+                } else if (e.metric === 'DVRInfo') {
+                    // Extract time info
+                    const isLive = e.value.manifestInfo.isDynamic;
+                    let hasDVR = isLive && e.value.manifestInfo.DVRWindowSize > this.config.dvrThreshold;
+                    const duration = e.value.range.end - e.value.range.start;
+
+                    // Make sure the user wants a DVR enabled stream.
+                    if (!this.config.dvrEnabled) {
+                        hasDVR = false;
+                    }
+
+                    this.meister.trigger('itemTimeInfo', {
+                        isLive,
+                        hasDVR,
+                        duration,
                     });
                 }
             });
@@ -235,34 +253,6 @@ class Dash extends Meister.MediaPlugin {
 
     onManifestLoaded(manifestEvent) {
         if (!manifestEvent.data) return;
-
-        // Extract time info
-        let isLive = false;
-        let hasDVR = false;
-        let duration = manifestEvent.data.mediaPresentationDuration;
-
-        if (!duration) {
-            isLive = true;
-        }
-
-        if (manifestEvent.data.timeShiftBufferDepth > this.config.dvrThreshold) {
-            // Store liveSync delay for later use
-            this.liveSyncDelay = manifestEvent.data.minBufferTime;
-
-            hasDVR = true;
-            duration = manifestEvent.data.timeShiftBufferDepth;
-        }
-
-        // Make sure the user wants a DVR enabled stream.
-        if (!this.config.dvrEnabled) {
-            hasDVR = false;
-        }
-
-        this.meister.trigger('itemTimeInfo', {
-            isLive,
-            hasDVR,
-            duration,
-        });
 
         // Retrieve then KID from the manifestEvent.
         const adaptationSet = manifestEvent.data.Period.AdaptationSet;
