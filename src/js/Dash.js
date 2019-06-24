@@ -112,6 +112,10 @@ class Dash extends Meister.MediaPlugin {
                 setDashOptions(this.name, this.dash, this.config.settings);
             }
 
+            if (typeof this.config.onDashInitialized === 'function') {
+                this.config.onDashInitialized(this.dash);
+            }
+
             // Items options alway overrule the config settings
             if (item.startFromLive) {
                 // This puts the delay as close to the edge as possible.

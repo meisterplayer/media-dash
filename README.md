@@ -30,7 +30,7 @@ Options are required unless marked as [optional]. For more detailed information 
     Allow use of the DVR window if one is present. By passing false all streams are considered as just livestreams. Defaults to true.
 * [optional] **dvrThreshold** :: *Number*  
     Content with a window longer than this threshold is considered as having a DVR window. Defaults to 300 (5 minutes).
-* [optional] **settings** :: *Object*  
+* [optional] ***Deprecated!*** **settings** :: *Object*  
     Settings for the internal dashjs object. These values are applied last, so they will override any presets from the lowMemoryMode.
     * [optional] **abandonLoadTimeout** :: *Number*  
         See [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html#setAbandonLoadTimeout__anchor).
@@ -62,6 +62,8 @@ Options are required unless marked as [optional]. For more detailed information 
         See [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html#setStableBufferTime__anchor).
     * [optional] **useSuggestedPresentationDelay** :: *Boolean*  
         See [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html#useSuggestedPresentationDelay__anchor).
+* [optional] **onDashInitialized** :: *Function<dashjs>*  
+    Callback called when a dash.js instance has been initialized. The function is called with the dash.js instance as the only argument. This will eventually replace the settings object as this provides more direct access. See the Dash.js [docs](http://cdn.dashjs.org/latest/jsdoc/module-MediaPlayer.html) for more information on the various settings.
 
 Item options
 ------------
