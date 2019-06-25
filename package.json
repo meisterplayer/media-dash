@@ -1,6 +1,6 @@
 {
   "name": "@meisterplayer/plugin-dash",
-  "version": "5.8.0",
+  "version": "5.8.0-2.9.3-hotfix",
   "description": "Meister plugin wrapping the dashjs player.",
   "main": "dist/Dash.js",
   "keywords": [
