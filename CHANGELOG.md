@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [5.8.0](https://github.com/meisterplayer/media-dash/compare/v5.7.3...v5.8.0) (2019-06-25)
+
+
+### Bug Fixes
+
+* **time:** Correctly report live status and DVR window for more streams ([5ec7fc0](https://github.com/meisterplayer/media-dash/commit/5ec7fc0))
+
+
+### Features
+
+* **config:** Make dash.js instance available for configuration ([ee96cd7](https://github.com/meisterplayer/media-dash/commit/ee96cd7))
+
+
+
 ### [5.7.3](https://github.com/meisterplayer/media-dash/compare/v5.7.2...v5.7.3) (2019-06-04)
 
 
